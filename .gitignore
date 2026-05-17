@@ -3,3 +3,9 @@ dist/
 .env
 *.env.local
 .DS_Store
+
+# RALPH loop scripts (local dev only)
+ralph-once.sh
+afk-ralph.sh
+ralph-prompt.md
+progress.txt
