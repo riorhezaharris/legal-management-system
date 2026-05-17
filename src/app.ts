@@ -1,6 +1,7 @@
 import express from 'express';
 import healthRouter from './routes/health';
 import usersRouter from './routes/users';
+import referenceDataRouter from './routes/reference-data';
 
 const app = express();
 
@@ -9,6 +10,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/health', healthRouter);
 app.use('/users', usersRouter);
+app.use('/admin', referenceDataRouter);
 
 app.use(
   (
