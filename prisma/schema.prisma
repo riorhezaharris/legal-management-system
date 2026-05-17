@@ -276,3 +276,8 @@ model UnitBisnis {
 
   requestorProfiles RequestorProfile[]
 }
+
+model RequestCounter {
+  year         Int @id
+  lastSequence Int @default(0)
+}
