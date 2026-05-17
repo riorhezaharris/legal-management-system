@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  IT_ADMIN
+  REQUESTOR
+  LEGAL_TEAM
+  VENDOR
+}
+
+enum KybStatus {
+  INVITED
+  SUBMITTED
+  REVISION
+  APPROVED
+}
+
+enum VendorType {
+  BADAN
+  PERORANGAN
+}
+
+enum RequestType {
+  PERJANJIAN_BARU
+  ADENDUM
+  SURAT
+  PERMINTAAN_DOKUMEN
+}
+
+enum RequestStatus {
+  DRAFT
+  WAITING
+  LEGAL_REVIEW
+  USER_REVIEW
+  VENDOR_REVIEW
+  INTERNAL_SIGNING
+  VENDOR_SIGNING
+  FINISHED
+  CANCELLED
+  REJECTED
+}
+
+enum StatusPerjanjian {
+  BELUM_BERLANGSUNG
+  SEDANG_BERLANGSUNG
+  SUDAH_SELESAI
+}
+
+enum HolidayType {
+  NATIONAL
+  CUSTOM
+}
+
+enum KybDocumentType {
+  AKTA_PENDIRIAN
+  SK_PENDIRIAN
+  NIB
+  KTP_PENANGGUNG_JAWAB
+  NPWP_BADAN
+  AKTA_PERUBAHAN_DIREKSI
+  SK_PERUBAHAN_DIREKSI
+  SURAT_KUASA
+  KTP
+  NPWP
+}
+
+enum AttachmentType {
+  ADENDUM_PREVIOUS_AGREEMENT
+  SURAT_PRIOR_CORRESPONDENCE
+  PERMINTAAN_SUPPORTING_DOC
+}
+
+model User {
+  id               String   @id @default(uuid())
+  supabaseId       String   @unique
+  email            String   @unique
+  name             String
+  role             Role
+  isActive         Boolean  @default(true)
+  profileCompleted Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  requestorProfile RequestorProfile?
+  legalRequests    LegalRequest[]   @relation("RequestorRequests")
+  handledRequests  LegalRequest[]   @relation("HandlerRequests")
+  stageHistories   StageHistory[]
+  kybReviews       KybReview[]
+}
+
+model RequestorProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  namaLengkap    String
+  lokasiKantorId String
+  divisiId       String
+  unitBisnisId   String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id])
+  lokasiKantor LokasiKantor @relation(fields: [lokasiKantorId], references: [id])
+  divisi       Divisi       @relation(fields: [divisiId], references: [id])
+  unitBisnis   UnitBisnis   @relation(fields: [unitBisnisId], references: [id])
+}
+
+model Vendor {
+  id         String      @id @default(uuid())
+  supabaseId String?     @unique
+  email      String      @unique
+  name       String
+  address    String?
+  type       VendorType?
+  kybStatus  KybStatus   @default(INVITED)
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  kybDocuments  KybDocument[]
+  kybReviews    KybReview[]
+  legalRequests LegalRequest[]
+}
+
+model KybDocument {
+  id           String          @id @default(uuid())
+  vendorId     String
+  documentType KybDocumentType
+  fileUrl      String
+  fileName     String
+  fileSize     Int
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+}
+
+model KybReview {
+  id          String   @id @default(uuid())
+  vendorId    String
+  remarks     String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  vendor    Vendor @relation(fields: [vendorId], references: [id])
+  createdBy User   @relation(fields: [createdById], references: [id])
+}
+
+model LegalRequest {
+  id                      String        @id @default(uuid())
+  requestorId             String
+  type                    RequestType
+  status                  RequestStatus @default(DRAFT)
+  referenceNumber         String?       @unique
+  vendorId                String?
+  submittedAt             DateTime?
+  slaDeadline             DateTime?
+  slaNotifiedApproaching  Boolean       @default(false)
+  slaNotifiedBreached     Boolean       @default(false)
+  firstHandlerId          String?
+  rejectionReason         String?
+  requiresInternalSigning Boolean       @default(false)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  requestor      User                     @relation("RequestorRequests", fields: [requestorId], references: [id])
+  firstHandler   User?                    @relation("HandlerRequests", fields: [firstHandlerId], references: [id])
+  vendor         Vendor?                  @relation(fields: [vendorId], references: [id])
+  data           LegalRequestData?
+  attachments    LegalRequestAttachment[]
+  finalDocuments FinalDocument[]
+  stageHistories StageHistory[]
+}
+
+model LegalRequestData {
+  id                     String            @id @default(uuid())
+  requestId              String            @unique
+  lingkupPerjanjian      String?
+  statusPerjanjian       StatusPerjanjian?
+  jangkaWaktuStart       DateTime?
+  jangkaWaktuEnd         DateTime?
+  perjanjianSebelumnya   String?
+  halYangInginDiubah     String?
+  suratYangHendakDibuat  String?
+  identitasPenerimaSurat String?
+  dokumenYangDiminta     String?
+  tujuanPermintaan       String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  request LegalRequest @relation(fields: [requestId], references: [id])
+}
+
+model LegalRequestAttachment {
+  id        String         @id @default(uuid())
+  requestId String
+  type      AttachmentType
+  fileUrl   String
+  fileName  String
+  fileSize  Int
+  createdAt DateTime       @default(now())
+
+  request LegalRequest @relation(fields: [requestId], references: [id])
+}
+
+model FinalDocument {
+  id        String   @id @default(uuid())
+  requestId String
+  fileUrl   String
+  fileName  String
+  fileSize  Int
+  createdAt DateTime @default(now())
+
+  request LegalRequest @relation(fields: [requestId], references: [id])
+}
+
+model StageHistory {
+  id        String        @id @default(uuid())
+  requestId String
+  fromStage RequestStatus?
+  toStage   RequestStatus
+  actorId   String
+  remarks   String?
+  createdAt DateTime      @default(now())
+
+  request LegalRequest @relation(fields: [requestId], references: [id])
+  actor   User         @relation(fields: [actorId], references: [id])
+}
+
+model SlaConfig {
+  id          String   @id @default("singleton")
+  workingDays Int      @default(5)
+  updatedAt   DateTime @updatedAt
+}
+
+model Holiday {
+  id          String      @id @default(uuid())
+  date        DateTime    @db.Date
+  description String
+  type        HolidayType
+  createdAt   DateTime    @default(now())
+
+  @@unique([date, type])
+}
+
+model LokasiKantor {
+  id                String             @id @default(uuid())
+  name              String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  requestorProfiles RequestorProfile[]
+}
+
+model Divisi {
+  id                String             @id @default(uuid())
+  name              String
+  code              String             @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  requestorProfiles RequestorProfile[]
+}
+
+model UnitBisnis {
+  id                String             @id @default(uuid())
+  name              String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  requestorProfiles RequestorProfile[]
+}
