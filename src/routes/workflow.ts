@@ -5,8 +5,13 @@ import { Role, RequestStatus, RequestType } from '@prisma/client';
 import { authenticate, requireProfileComplete, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { storage } from '../lib/storage';
-import { resend } from '../lib/resend';
 import { transition, TransitionAction, WorkflowError } from '../services/workflow';
+import {
+  notifyRequestorStageAdvanced,
+  notifyRequestorSentBack,
+  notifyRequestorRejected,
+  notifyRequestorFinished,
+} from '../services/notifications';
 
 const router = Router();
 
@@ -23,10 +28,6 @@ const VALID_ACTIONS: TransitionAction[] = [
   'CONFIRM_VENDOR',
   'MARK_INTERNAL_SIGNING_REQUIRED',
 ];
-
-function fromEmail(): string {
-  return process.env.RESEND_FROM_EMAIL ?? 'noreply@example.com';
-}
 
 function isValidForFinish(request: {
   status: RequestStatus;
@@ -55,38 +56,21 @@ function sendTransitionNotification(
   remarks?: string,
   reason?: string,
 ): void {
-  const from = fromEmail();
   const refNum = result.referenceNumber ?? '(draft)';
   const requestorEmail = result.requestor?.email;
-
-  const send = (subject: string, html: string) => {
-    if (requestorEmail) {
-      resend.emails
-        .send({ from, to: requestorEmail, subject, html })
-        .catch((err: Error) => console.error('Failed to send transition notification:', err));
-    }
-  };
+  if (!requestorEmail) return;
 
   switch (action) {
     case 'SEND_BACK':
-      send(
-        `Permintaan Legal Dikembalikan — ${refNum}`,
-        `<p>Permintaan legal Anda <strong>${refNum}</strong> telah dikembalikan untuk revisi.</p><p>Catatan: ${remarks ?? ''}</p>`,
-      );
+      notifyRequestorSentBack(requestorEmail, refNum, remarks ?? '');
       break;
     case 'REJECT':
-      send(
-        `Permintaan Legal Ditolak — ${refNum}`,
-        `<p>Permintaan legal Anda <strong>${refNum}</strong> telah ditolak.</p><p>Alasan: ${reason ?? ''}</p>`,
-      );
+      notifyRequestorRejected(requestorEmail, refNum, reason ?? '');
       break;
     case 'ADVANCE':
     case 'CONFIRM_VENDOR':
     case 'MARK_INTERNAL_SIGNING_REQUIRED':
-      send(
-        `Status Permintaan Legal Diperbarui — ${refNum}`,
-        `<p>Status permintaan legal Anda <strong>${refNum}</strong> telah diperbarui ke <strong>${result.status}</strong>.</p>`,
-      );
+      notifyRequestorStageAdvanced(requestorEmail, refNum, result.status);
       break;
     default:
       break;
@@ -237,15 +221,8 @@ router.post(
       });
 
       const requestorEmail = (updated.requestor as any)?.email;
-      if (requestorEmail) {
-        resend.emails
-          .send({
-            from: fromEmail(),
-            to: requestorEmail,
-            subject: `Permintaan Legal Selesai — ${updated.referenceNumber}`,
-            html: `<p>Permintaan legal Anda dengan nomor referensi <strong>${updated.referenceNumber}</strong> telah selesai diproses.</p>`,
-          })
-          .catch((err: Error) => console.error('Failed to send finished email:', err));
+      if (requestorEmail && updated.referenceNumber) {
+        notifyRequestorFinished(requestorEmail, updated.referenceNumber);
       }
 
       res.json(updated);

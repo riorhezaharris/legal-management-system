@@ -5,9 +5,9 @@ import { Role, RequestType, RequestStatus, StatusPerjanjian, AttachmentType } fr
 import { authenticate, requireProfileComplete, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { storage } from '../lib/storage';
-import { resend } from '../lib/resend';
 import { generate as generateRefNumber } from '../services/reference-number';
 import { computeDeadline } from '../services/sla';
+import { notifyLegalTeamNewRequest } from '../services/notifications';
 
 const router = Router();
 
@@ -94,21 +94,12 @@ function buildVisibilityFilter(user: NonNullable<Request['user']>): Record<strin
   return {};
 }
 
-async function notifyLegalTeam(subject: string, html: string): Promise<void> {
+async function getLegalTeamEmails(): Promise<string[]> {
   const legalUsers = await prisma.user.findMany({
     where: { role: Role.LEGAL_TEAM, isActive: true },
     select: { email: true },
   });
-  for (const { email } of legalUsers) {
-    resend.emails
-      .send({
-        from: process.env.RESEND_FROM_EMAIL ?? 'noreply@example.com',
-        to: email,
-        subject,
-        html,
-      })
-      .catch(err => console.error('Failed to send email to legal team:', err));
-  }
+  return legalUsers.map(u => u.email);
 }
 
 // POST /requests
@@ -245,11 +236,9 @@ router.post(
         return created;
       });
 
-      if (shouldSubmit) {
-        await notifyLegalTeam(
-          `Permintaan Legal Baru — ${request.referenceNumber}`,
-          `<p>Permintaan legal baru telah diajukan dengan nomor referensi <strong>${request.referenceNumber}</strong>.</p>`,
-        );
+      if (shouldSubmit && request.referenceNumber) {
+        const legalEmails = await getLegalTeamEmails();
+        notifyLegalTeamNewRequest(legalEmails, request.referenceNumber);
       }
 
       res.status(201).json(request);
@@ -458,10 +447,8 @@ router.post(
         return updatedRequest;
       });
 
-      await notifyLegalTeam(
-        `Permintaan Legal Baru — ${referenceNumber}`,
-        `<p>Permintaan legal baru telah diajukan dengan nomor referensi <strong>${referenceNumber}</strong>.</p>`,
-      );
+      const legalEmails = await getLegalTeamEmails();
+      notifyLegalTeamNewRequest(legalEmails, referenceNumber);
 
       res.json(updated);
     } catch (err) {

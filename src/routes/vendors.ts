@@ -4,7 +4,13 @@ import { Role, KybStatus, KybDocumentType, VendorType } from '@prisma/client';
 import { authenticate, requireProfileComplete, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { supabase, storage } from '../lib/storage';
-import { resend } from '../lib/resend';
+import {
+  notifyVendorInvitation,
+  notifyLegalTeamKybSubmitted,
+  notifyLegalTeamKybUpdated,
+  notifyLegalTeamKybResubmitted,
+  notifyVendorKybRevision,
+} from '../services/notifications';
 
 const router = Router();
 
@@ -126,21 +132,7 @@ router.post(
         },
       });
 
-      try {
-        await resend.emails.send({
-          from: process.env.RESEND_FROM_EMAIL ?? 'noreply@example.com',
-          to: email,
-          subject: 'Undangan Onboarding Vendor — Sistem Manajemen Legal',
-          html: `
-            <p>Anda diundang untuk mendaftar sebagai Vendor di Sistem Manajemen Legal Cikal.</p>
-            <p>Klik tautan berikut untuk mengatur kata sandi dan melengkapi profil KYB Anda:</p>
-            <p><a href="${inviteLink}">Aktifkan Akun Anda</a></p>
-            <p>Tautan ini hanya berlaku selama 24 jam.</p>
-          `,
-        });
-      } catch (emailErr) {
-        console.error('Failed to send vendor invitation email:', emailErr);
-      }
+      notifyVendorInvitation(email, inviteLink);
 
       res.status(201).json(vendor);
     } catch (err) {
@@ -324,25 +316,14 @@ router.post(
         where: { role: Role.LEGAL_TEAM, isActive: true },
         select: { email: true },
       });
+      const legalEmails = legalUsers.map(u => u.email);
 
-      const subject = isRevisionResubmission
-        ? `Vendor Re-submitted KYB After Revision — ${vendor.name}`
-        : isFirstSubmission
-          ? `Vendor KYB Submitted — ${vendor.name}`
-          : `Vendor Updated KYB Documents — ${vendor.name}`;
-      const body = isRevisionResubmission
-        ? `Vendor <strong>${vendor.name}</strong> (${vendor.email}) telah mengajukan ulang dokumen KYB setelah revisi.`
-        : `Vendor <strong>${vendor.name}</strong> (${vendor.email}) telah mengajukan dokumen KYB dan menunggu tinjauan.`;
-
-      for (const { email } of legalUsers) {
-        resend.emails
-          .send({
-            from: process.env.RESEND_FROM_EMAIL ?? 'noreply@example.com',
-            to: email,
-            subject,
-            html: `<p>${body}</p>`,
-          })
-          .catch(err => console.error('Failed to send KYB notification email:', err));
+      if (isRevisionResubmission) {
+        notifyLegalTeamKybResubmitted(legalEmails, vendor.name, vendor.email);
+      } else if (isFirstSubmission) {
+        notifyLegalTeamKybSubmitted(legalEmails, vendor.name, vendor.email);
+      } else {
+        notifyLegalTeamKybUpdated(legalEmails, vendor.name, vendor.email);
       }
 
       const updatedVendor = await prisma.vendor.findUnique({
@@ -399,19 +380,7 @@ router.post(
         });
       });
 
-      resend.emails
-        .send({
-          from: process.env.RESEND_FROM_EMAIL ?? 'noreply@example.com',
-          to: vendor.email,
-          subject: 'Revisi Dokumen KYB Diperlukan',
-          html: `
-            <p>Dokumen KYB Anda memerlukan revisi.</p>
-            <p><strong>Catatan dari Legal Team:</strong></p>
-            <blockquote>${remarks.trim()}</blockquote>
-            <p>Silakan lengkapi dokumen Anda dan ajukan ulang.</p>
-          `,
-        })
-        .catch(err => console.error('Failed to send revision email to vendor:', err));
+      notifyVendorKybRevision(vendor.email, remarks.trim());
 
       res.json({ message: 'Revision request sent', kybStatus: KybStatus.REVISION });
     } catch (err) {
