@@ -6,6 +6,7 @@ import { authenticate, requireProfileComplete, requireRole } from '../middleware
 import { prisma } from '../lib/prisma';
 import { storage } from '../lib/storage';
 import { submitDraft, SubmissionError } from '../services/request-submission';
+import { vendorRequired } from '../services/request-policy';
 
 const router = Router();
 
@@ -78,7 +79,7 @@ router.post(
         return;
       }
 
-      if ((type === RequestType.SURAT || type === RequestType.PERMINTAAN_DOKUMEN) && vendorId) {
+      if (!vendorRequired(type as RequestType) && vendorId) {
         res.status(400).json({ error: `vendorId is not accepted for request type ${type}` });
         return;
       }
@@ -199,7 +200,7 @@ router.patch(
         return;
       }
 
-      if ((request.type === RequestType.SURAT || request.type === RequestType.PERMINTAAN_DOKUMEN) && vendorId) {
+      if (!vendorRequired(request.type) && vendorId) {
         res.status(400).json({ error: `vendorId is not accepted for request type ${request.type}` });
         return;
       }

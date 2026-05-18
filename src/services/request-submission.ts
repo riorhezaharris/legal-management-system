@@ -1,4 +1,5 @@
 import { RequestStatus, RequestType, Role, StatusPerjanjian } from '@prisma/client';
+import { vendorRequired } from './request-policy';
 import { prisma } from '../lib/prisma';
 import { generate as generateRefNumber } from './reference-number';
 import { computeDeadline } from './sla';
@@ -20,6 +21,8 @@ function validateSubmitFields(
   vendorId: string | null | undefined,
   attachmentTypes: string[],
 ): void {
+  if (vendorRequired(type) && !vendorId) throw new SubmissionError(`vendorId is required for ${type}`);
+
   switch (type) {
     case RequestType.PERJANJIAN_BARU:
       if (!data.lingkupPerjanjian) throw new SubmissionError('lingkupPerjanjian is required');
@@ -27,14 +30,12 @@ function validateSubmitFields(
         throw new SubmissionError('statusPerjanjian must be BELUM_BERLANGSUNG, SEDANG_BERLANGSUNG, or SUDAH_SELESAI');
       if (!data.jangkaWaktuStart) throw new SubmissionError('jangkaWaktuStart is required');
       if (!data.jangkaWaktuEnd) throw new SubmissionError('jangkaWaktuEnd is required');
-      if (!vendorId) throw new SubmissionError('vendorId is required for PERJANJIAN_BARU');
       break;
     case RequestType.ADENDUM:
       if (!data.perjanjianSebelumnya) throw new SubmissionError('perjanjianSebelumnya is required');
       if (!data.halYangInginDiubah) throw new SubmissionError('halYangInginDiubah is required');
       if (!attachmentTypes.includes('ADENDUM_PREVIOUS_AGREEMENT'))
         throw new SubmissionError('Lampirkan Perjanjian Sebelumnya is required for ADENDUM');
-      if (!vendorId) throw new SubmissionError('vendorId is required for ADENDUM');
       break;
     case RequestType.SURAT:
       if (!data.suratYangHendakDibuat) throw new SubmissionError('suratYangHendakDibuat is required');

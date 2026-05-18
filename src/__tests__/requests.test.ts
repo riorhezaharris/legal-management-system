@@ -391,7 +391,7 @@ describe('POST /requests', () => {
 
   it('returns 400 when PERJANJIAN_BARU has invalid statusPerjanjian on submit', async () => {
     mockRequest.findUnique.mockResolvedValueOnce(
-      makeRequest({ vendorId: null, vendor: null, data: { ...makeRequest().data, statusPerjanjian: 'INVALID_STATUS' } }) as any,
+      makeRequest({ data: { ...makeRequest().data, statusPerjanjian: 'INVALID_STATUS' } }) as any,
     );
     const res = await request(app)
       .post('/requests')
