@@ -7,6 +7,11 @@ import {
   WorkflowError,
   RequestSnapshot,
 } from './workflow-policy';
+import {
+  notifyRequestorStageAdvanced,
+  notifyRequestorSentBack,
+  notifyRequestorRejected,
+} from './notifications';
 
 export { TransitionAction, TransitionOptions, WorkflowError } from './workflow-policy';
 
@@ -30,7 +35,7 @@ export async function transition(
 
   const { toStage, extraData } = evaluate(action, actor, request as RequestSnapshot, options);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.legalRequest.update({
       where: { id: requestId },
       data: { status: toStage, ...extraData },
@@ -56,4 +61,24 @@ export async function transition(
 
     return updated;
   });
+
+  const refNum = result.referenceNumber ?? '(draft)';
+  const requestorEmail = (result.requestor as any)?.email;
+  if (requestorEmail) {
+    switch (action) {
+      case 'SEND_BACK':
+        notifyRequestorSentBack(requestorEmail, refNum, options.remarks ?? '');
+        break;
+      case 'REJECT':
+        notifyRequestorRejected(requestorEmail, refNum, options.reason ?? '');
+        break;
+      case 'ADVANCE':
+      case 'CONFIRM_VENDOR':
+      case 'MARK_INTERNAL_SIGNING_REQUIRED':
+        notifyRequestorStageAdvanced(requestorEmail, refNum, result.status);
+        break;
+    }
+  }
+
+  return result;
 }

@@ -7,12 +7,7 @@ import { prisma } from '../lib/prisma';
 import { storage } from '../lib/storage';
 import { transition, TransitionAction, WorkflowError } from '../services/workflow';
 import { isValidForFinish, stampFirstHandler } from '../services/workflow-policy';
-import {
-  notifyRequestorStageAdvanced,
-  notifyRequestorSentBack,
-  notifyRequestorRejected,
-  notifyRequestorFinished,
-} from '../services/notifications';
+import { notifyRequestorFinished } from '../services/notifications';
 
 const router = Router();
 
@@ -29,34 +24,6 @@ const VALID_ACTIONS: TransitionAction[] = [
   'CONFIRM_VENDOR',
   'MARK_INTERNAL_SIGNING_REQUIRED',
 ];
-
-
-function sendTransitionNotification(
-  result: any,
-  action: TransitionAction,
-  remarks?: string,
-  reason?: string,
-): void {
-  const refNum = result.referenceNumber ?? '(draft)';
-  const requestorEmail = result.requestor?.email;
-  if (!requestorEmail) return;
-
-  switch (action) {
-    case 'SEND_BACK':
-      notifyRequestorSentBack(requestorEmail, refNum, remarks ?? '');
-      break;
-    case 'REJECT':
-      notifyRequestorRejected(requestorEmail, refNum, reason ?? '');
-      break;
-    case 'ADVANCE':
-    case 'CONFIRM_VENDOR':
-    case 'MARK_INTERNAL_SIGNING_REQUIRED':
-      notifyRequestorStageAdvanced(requestorEmail, refNum, result.status);
-      break;
-    default:
-      break;
-  }
-}
 
 // POST /requests/:id/transition
 router.post(
@@ -84,8 +51,6 @@ router.post(
         remarks,
         reason,
       });
-
-      sendTransitionNotification(result, action as TransitionAction, remarks, reason);
 
       res.json(result);
     } catch (err) {

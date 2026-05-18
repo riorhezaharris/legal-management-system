@@ -10,6 +10,7 @@ import {
   notifyLegalTeamKybUpdated,
   notifyLegalTeamKybResubmitted,
   notifyVendorKybRevision,
+  getLegalTeamEmails,
 } from '../services/notifications';
 import { evaluateKyb, KybError, validateDocumentSet } from '../services/kyb-policy';
 
@@ -297,11 +298,7 @@ router.post(
         });
       });
 
-      const legalUsers = await prisma.user.findMany({
-        where: { role: Role.LEGAL_TEAM, isActive: true },
-        select: { email: true },
-      });
-      const legalEmails = legalUsers.map(u => u.email);
+      const legalEmails = await getLegalTeamEmails();
 
       if (isRevisionResubmission) {
         notifyLegalTeamKybResubmitted(legalEmails, vendor.name, vendor.email);

@@ -1,3 +1,5 @@
+import { Role } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { resend } from '../lib/resend';
 
 function fromEmail(): string {
@@ -14,6 +16,14 @@ function sendToMany(recipients: string[], subject: string, html: string): void {
   for (const to of recipients) {
     send(to, subject, html);
   }
+}
+
+export async function getLegalTeamEmails(): Promise<string[]> {
+  const users = await prisma.user.findMany({
+    where: { role: Role.LEGAL_TEAM, isActive: true },
+    select: { email: true },
+  });
+  return users.map((u) => u.email);
 }
 
 export function notifyLegalTeamNewRequest(legalEmails: string[], refNum: string): void {

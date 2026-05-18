@@ -4,15 +4,12 @@ import {
   notifyLegalTeamSlaApproaching,
   notifyLegalTeamSlaBreached,
   notifyRequestorSlaBreached,
+  getLegalTeamEmails,
 } from '../services/notifications';
 
 export async function runSlaJob(): Promise<void> {
   try {
-    const legalTeamMembers = await prisma.user.findMany({
-      where: { role: 'LEGAL_TEAM', isActive: true },
-      select: { email: true },
-    });
-    const legalEmails = legalTeamMembers.map((u) => u.email);
+    const legalEmails = await getLegalTeamEmails();
 
     const requests = await prisma.legalRequest.findMany({
       where: {

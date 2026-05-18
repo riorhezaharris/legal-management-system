@@ -2,6 +2,7 @@ import { runSlaJob } from '../jobs/slaJob';
 import { prisma } from '../lib/prisma';
 import { getStatus } from '../services/sla';
 import {
+  getLegalTeamEmails,
   notifyLegalTeamSlaApproaching,
   notifyLegalTeamSlaBreached,
   notifyRequestorSlaBreached,
@@ -19,14 +20,15 @@ jest.mock('../services/sla', () => ({
 }));
 
 jest.mock('../services/notifications', () => ({
+  getLegalTeamEmails: jest.fn(),
   notifyLegalTeamSlaApproaching: jest.fn(),
   notifyLegalTeamSlaBreached: jest.fn(),
   notifyRequestorSlaBreached: jest.fn(),
 }));
 
-const mockUser = (prisma as any).user as { findMany: jest.Mock };
 const mockLegalRequest = (prisma as any).legalRequest as { findMany: jest.Mock; update: jest.Mock };
 const mockGetStatus = getStatus as jest.Mock;
+const mockGetLegalTeamEmails = getLegalTeamEmails as jest.Mock;
 const mockNotifyApproaching = notifyLegalTeamSlaApproaching as jest.Mock;
 const mockNotifyLegalBreached = notifyLegalTeamSlaBreached as jest.Mock;
 const mockNotifyRequestorBreached = notifyRequestorSlaBreached as jest.Mock;
@@ -47,7 +49,7 @@ function makeRequest(overrides: Record<string, unknown> = {}): Record<string, un
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockUser.findMany.mockResolvedValue(LEGAL_EMAILS.map((email) => ({ email })));
+  mockGetLegalTeamEmails.mockResolvedValue(LEGAL_EMAILS);
   mockLegalRequest.findMany.mockResolvedValue([]);
   mockLegalRequest.update.mockResolvedValue({});
 });

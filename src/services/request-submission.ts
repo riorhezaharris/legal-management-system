@@ -1,9 +1,9 @@
-import { RequestStatus, RequestType, Role, StatusPerjanjian } from '@prisma/client';
+import { RequestStatus, RequestType, StatusPerjanjian } from '@prisma/client';
 import { vendorRequired } from './request-policy';
 import { prisma } from '../lib/prisma';
 import { generate as generateRefNumber } from './reference-number';
 import { computeDeadline } from './sla';
-import { notifyLegalTeamNewRequest } from './notifications';
+import { notifyLegalTeamNewRequest, getLegalTeamEmails } from './notifications';
 
 export class SubmissionError extends Error {
   constructor(
@@ -46,14 +46,6 @@ function validateSubmitFields(
       if (!data.tujuanPermintaan) throw new SubmissionError('tujuanPermintaan is required');
       break;
   }
-}
-
-async function getLegalTeamEmails(): Promise<string[]> {
-  const legalUsers = await prisma.user.findMany({
-    where: { role: Role.LEGAL_TEAM, isActive: true },
-    select: { email: true },
-  });
-  return legalUsers.map((u) => u.email);
 }
 
 export async function submitDraft(requestId: string, actorId: string) {
