@@ -1,5 +1,5 @@
-import { KybStatus } from '@prisma/client';
-import { evaluateKyb, KybError, VendorSnapshot } from '../services/kyb-policy';
+import { KybDocumentType, KybStatus, VendorType } from '@prisma/client';
+import { evaluateKyb, getRequiredDocuments, KybError, validateDocumentSet, VendorSnapshot } from '../services/kyb-policy';
 
 const vendor = (kybStatus: KybStatus, id = 'vendor-1'): VendorSnapshot => ({ id, kybStatus });
 
@@ -186,5 +186,108 @@ describe('evaluateKyb unknown action', () => {
     expect(() =>
       evaluateKyb('NONEXISTENT' as any, adminActor(), vendor(KybStatus.SUBMITTED))
     ).toThrow(KybError);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// getRequiredDocuments
+// ─────────────────────────────────────────────────────────────────
+
+describe('getRequiredDocuments', () => {
+  it('returns 7 documents for BADAN', () => {
+    const docs = getRequiredDocuments(VendorType.BADAN);
+    expect(docs).toHaveLength(7);
+    expect(docs).toContain(KybDocumentType.AKTA_PENDIRIAN);
+    expect(docs).toContain(KybDocumentType.SK_PENDIRIAN);
+    expect(docs).toContain(KybDocumentType.NIB);
+    expect(docs).toContain(KybDocumentType.KTP_PENANGGUNG_JAWAB);
+    expect(docs).toContain(KybDocumentType.NPWP_BADAN);
+    expect(docs).toContain(KybDocumentType.AKTA_PERUBAHAN_DIREKSI);
+    expect(docs).toContain(KybDocumentType.SK_PERUBAHAN_DIREKSI);
+  });
+
+  it('returns 2 documents for PERORANGAN', () => {
+    const docs = getRequiredDocuments(VendorType.PERORANGAN);
+    expect(docs).toHaveLength(2);
+    expect(docs).toContain(KybDocumentType.KTP);
+    expect(docs).toContain(KybDocumentType.NPWP);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// validateDocumentSet
+// ─────────────────────────────────────────────────────────────────
+
+const allBadan = (): KybDocumentType[] => [
+  KybDocumentType.AKTA_PENDIRIAN,
+  KybDocumentType.SK_PENDIRIAN,
+  KybDocumentType.NIB,
+  KybDocumentType.KTP_PENANGGUNG_JAWAB,
+  KybDocumentType.NPWP_BADAN,
+  KybDocumentType.AKTA_PERUBAHAN_DIREKSI,
+  KybDocumentType.SK_PERUBAHAN_DIREKSI,
+];
+
+const allPerorangan = (): KybDocumentType[] => [
+  KybDocumentType.KTP,
+  KybDocumentType.NPWP,
+];
+
+describe('validateDocumentSet BADAN', () => {
+  it('returns no missing when all required docs are submitted', () => {
+    expect(validateDocumentSet(VendorType.BADAN, allBadan())).toEqual({ missing: [] });
+  });
+
+  it('returns missing when AKTA_PENDIRIAN is absent', () => {
+    const submitted = allBadan().filter(d => d !== KybDocumentType.AKTA_PENDIRIAN);
+    const { missing } = validateDocumentSet(VendorType.BADAN, submitted);
+    expect(missing).toEqual([KybDocumentType.AKTA_PENDIRIAN]);
+  });
+
+  it('returns all missing when multiple docs are absent', () => {
+    const submitted = allBadan().filter(
+      d => d !== KybDocumentType.NIB && d !== KybDocumentType.NPWP_BADAN,
+    );
+    const { missing } = validateDocumentSet(VendorType.BADAN, submitted);
+    expect(missing).toContain(KybDocumentType.NIB);
+    expect(missing).toContain(KybDocumentType.NPWP_BADAN);
+    expect(missing).toHaveLength(2);
+  });
+
+  it('returns no missing when optional SURAT_KUASA is also submitted', () => {
+    const submitted = [...allBadan(), KybDocumentType.SURAT_KUASA];
+    expect(validateDocumentSet(VendorType.BADAN, submitted)).toEqual({ missing: [] });
+  });
+
+  it('returns all 7 as missing when nothing is submitted', () => {
+    const { missing } = validateDocumentSet(VendorType.BADAN, []);
+    expect(missing).toHaveLength(7);
+  });
+});
+
+describe('validateDocumentSet PERORANGAN', () => {
+  it('returns no missing when all required docs are submitted', () => {
+    expect(validateDocumentSet(VendorType.PERORANGAN, allPerorangan())).toEqual({ missing: [] });
+  });
+
+  it('returns missing when KTP is absent', () => {
+    const { missing } = validateDocumentSet(VendorType.PERORANGAN, [KybDocumentType.NPWP]);
+    expect(missing).toEqual([KybDocumentType.KTP]);
+  });
+
+  it('returns missing when NPWP is absent', () => {
+    const { missing } = validateDocumentSet(VendorType.PERORANGAN, [KybDocumentType.KTP]);
+    expect(missing).toEqual([KybDocumentType.NPWP]);
+  });
+
+  it('returns both missing when nothing is submitted', () => {
+    const { missing } = validateDocumentSet(VendorType.PERORANGAN, []);
+    expect(missing).toHaveLength(2);
+  });
+
+  it('BADAN docs do not satisfy PERORANGAN requirements', () => {
+    const { missing } = validateDocumentSet(VendorType.PERORANGAN, allBadan());
+    expect(missing).toContain(KybDocumentType.KTP);
+    expect(missing).toContain(KybDocumentType.NPWP);
   });
 });

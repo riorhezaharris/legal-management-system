@@ -1,4 +1,4 @@
-import { KybStatus, Role } from '@prisma/client';
+import { KybStatus, KybDocumentType, Role, VendorType } from '@prisma/client';
 import { AuthUser } from '../middleware/auth';
 
 export type KybAction = 'SUBMIT' | 'REQUEST_REVISION' | 'APPROVE' | 'RESET';
@@ -20,6 +20,35 @@ export class KybError extends Error {
 export interface VendorSnapshot {
   id: string;
   kybStatus: KybStatus;
+}
+
+const BADAN_REQUIRED: KybDocumentType[] = [
+  KybDocumentType.AKTA_PENDIRIAN,
+  KybDocumentType.SK_PENDIRIAN,
+  KybDocumentType.NIB,
+  KybDocumentType.KTP_PENANGGUNG_JAWAB,
+  KybDocumentType.NPWP_BADAN,
+  KybDocumentType.AKTA_PERUBAHAN_DIREKSI,
+  KybDocumentType.SK_PERUBAHAN_DIREKSI,
+];
+
+const PERORANGAN_REQUIRED: KybDocumentType[] = [
+  KybDocumentType.KTP,
+  KybDocumentType.NPWP,
+];
+
+export function getRequiredDocuments(vendorType: VendorType): KybDocumentType[] {
+  return vendorType === VendorType.BADAN ? BADAN_REQUIRED : PERORANGAN_REQUIRED;
+}
+
+export function validateDocumentSet(
+  vendorType: VendorType,
+  submittedDocTypes: KybDocumentType[],
+): { missing: KybDocumentType[] } {
+  const required = getRequiredDocuments(vendorType);
+  const submitted = new Set(submittedDocTypes);
+  const missing = required.filter(doc => !submitted.has(doc));
+  return { missing };
 }
 
 export function evaluateKyb(

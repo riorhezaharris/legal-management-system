@@ -11,7 +11,7 @@ import {
   notifyLegalTeamKybResubmitted,
   notifyVendorKybRevision,
 } from '../services/notifications';
-import { evaluateKyb, KybError } from '../services/kyb-policy';
+import { evaluateKyb, KybError, validateDocumentSet } from '../services/kyb-policy';
 
 const router = Router();
 
@@ -24,20 +24,6 @@ const upload = multer({
 
 const KYB_UPLOAD_FIELDS = Object.values(KybDocumentType).map(t => ({ name: t, maxCount: 1 }));
 
-const BADAN_REQUIRED: KybDocumentType[] = [
-  KybDocumentType.AKTA_PENDIRIAN,
-  KybDocumentType.SK_PENDIRIAN,
-  KybDocumentType.NIB,
-  KybDocumentType.KTP_PENANGGUNG_JAWAB,
-  KybDocumentType.NPWP_BADAN,
-  KybDocumentType.AKTA_PERUBAHAN_DIREKSI,
-  KybDocumentType.SK_PERUBAHAN_DIREKSI,
-];
-
-const PERORANGAN_REQUIRED: KybDocumentType[] = [
-  KybDocumentType.KTP,
-  KybDocumentType.NPWP,
-];
 
 function parseKybFiles(req: Request, res: Response, next: NextFunction): void {
   upload.fields(KYB_UPLOAD_FIELDS)(req, res, (err) => {
@@ -250,12 +236,11 @@ router.post(
       }
 
       const files = (req.files ?? {}) as Record<string, Express.Multer.File[]>;
-      const required = vendorType === VendorType.BADAN ? BADAN_REQUIRED : PERORANGAN_REQUIRED;
-      for (const docType of required) {
-        if (!files[docType]?.length) {
-          res.status(400).json({ error: `Missing required document: ${docType}` });
-          return;
-        }
+      const submittedDocTypes = Object.values(KybDocumentType).filter(t => (files[t]?.length ?? 0) > 0);
+      const { missing } = validateDocumentSet(vendorType as VendorType, submittedDocTypes);
+      if (missing.length > 0) {
+        res.status(400).json({ error: `Missing required documents: ${missing.join(', ')}` });
+        return;
       }
 
       const docRecords: Array<{
