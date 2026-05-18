@@ -5,6 +5,7 @@ import referenceDataRouter from './routes/reference-data';
 import slaHolidaysRouter from './routes/sla-holidays';
 import authRouter from './routes/auth';
 import vendorsRouter from './routes/vendors';
+import requestsRouter from './routes/requests';
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use('/users', usersRouter);
 app.use('/admin', referenceDataRouter);
 app.use('/admin', slaHolidaysRouter);
 app.use('/vendors', vendorsRouter);
+app.use('/requests', requestsRouter);
 
 app.use(
   (
