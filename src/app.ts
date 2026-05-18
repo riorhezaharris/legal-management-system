@@ -3,6 +3,7 @@ import healthRouter from './routes/health';
 import usersRouter from './routes/users';
 import referenceDataRouter from './routes/reference-data';
 import slaHolidaysRouter from './routes/sla-holidays';
+import authRouter from './routes/auth';
 
 const app = express();
 
@@ -10,6 +11,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/health', healthRouter);
+app.use('/auth', authRouter);
 app.use('/users', usersRouter);
 app.use('/admin', referenceDataRouter);
 app.use('/admin', slaHolidaysRouter);

@@ -1,12 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { Role } from '@prisma/client';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate, requireProfileComplete, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { supabase } from '../lib/storage';
 
 const router = Router();
 
-router.use(authenticate, requireRole(Role.IT_ADMIN));
+router.use(authenticate, requireProfileComplete, requireRole(Role.IT_ADMIN));
 
 router.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {

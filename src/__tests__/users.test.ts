@@ -33,6 +33,7 @@ jest.mock('../middleware/auth', () => ({
     req.user = mockCurrentUser;
     next();
   },
+  requireProfileComplete: (_req: any, _res: any, next: any) => next(),
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => {
     if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Forbidden' });

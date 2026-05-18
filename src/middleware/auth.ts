@@ -140,3 +140,21 @@ export function requireRole(...roles: Role[]) {
     next();
   };
 }
+
+export function requireProfileComplete(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user || req.user.role !== Role.REQUESTOR) {
+    next();
+    return;
+  }
+
+  if (!req.user.profileCompleted) {
+    res.status(403).json({ code: 'PROFILE_INCOMPLETE' });
+    return;
+  }
+
+  next();
+}
