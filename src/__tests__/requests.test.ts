@@ -348,6 +348,176 @@ describe('POST /requests', () => {
       }),
     );
   });
+
+  it('returns 400 when file exceeds 20MB limit', async () => {
+    const bigBuffer = Buffer.alloc(21 * 1024 * 1024);
+    const res = await request(app)
+      .post('/requests')
+      .attach('ADENDUM_PREVIOUS_AGREEMENT', bigBuffer, {
+        filename: 'huge.pdf',
+        contentType: 'application/pdf',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/too large/i);
+  });
+
+  it('returns 500 when multer receives an unexpected file field', async () => {
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'SURAT')
+      .attach('UNEXPECTED_FIELD', Buffer.from('data'), {
+        filename: 'file.pdf',
+        contentType: 'application/pdf',
+      });
+    expect(res.status).toBe(500);
+  });
+
+  it('returns 400 when PERJANJIAN_BARU has invalid statusPerjanjian on submit', async () => {
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'PERJANJIAN_BARU')
+      .field('submit', 'true')
+      .field('lingkupPerjanjian', 'Scope')
+      .field('statusPerjanjian', 'INVALID_STATUS')
+      .field('jangkaWaktuStart', '2026-06-01')
+      .field('jangkaWaktuEnd', '2026-12-31');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/statusPerjanjian/i);
+  });
+
+  it('returns 400 when SURAT is missing suratYangHendakDibuat on submit', async () => {
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'SURAT')
+      .field('submit', 'true');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/suratYangHendakDibuat/i);
+  });
+
+  it('returns 400 when SURAT is missing identitasPenerimaSurat on submit', async () => {
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'SURAT')
+      .field('submit', 'true')
+      .field('suratYangHendakDibuat', 'Surat Keterangan');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/identitasPenerimaSurat/i);
+  });
+
+  it('returns 400 when PERMINTAAN_DOKUMEN is missing dokumenYangDiminta on submit', async () => {
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'PERMINTAAN_DOKUMEN')
+      .field('submit', 'true');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/dokumenYangDiminta/i);
+  });
+
+  it('returns 400 when PERMINTAAN_DOKUMEN is missing tujuanPermintaan on submit', async () => {
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'PERMINTAAN_DOKUMEN')
+      .field('submit', 'true')
+      .field('dokumenYangDiminta', 'BPKB');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/tujuanPermintaan/i);
+  });
+
+  it('returns 400 when requestor profile is not found on submit', async () => {
+    mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockProfile.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'PERJANJIAN_BARU')
+      .field('submit', 'true')
+      .field('vendorId', 'vendor-1')
+      .field('lingkupPerjanjian', 'Scope')
+      .field('statusPerjanjian', 'BELUM_BERLANGSUNG')
+      .field('jangkaWaktuStart', '2026-06-01')
+      .field('jangkaWaktuEnd', '2026-12-31');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/profile/i);
+  });
+
+  it('returns 500 on unexpected database error', async () => {
+    (prisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('DB down'));
+    mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockProfile.findUnique.mockResolvedValue(baseProfile as any);
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'PERJANJIAN_BARU')
+      .field('submit', 'true')
+      .field('vendorId', 'vendor-1')
+      .field('lingkupPerjanjian', 'Scope')
+      .field('statusPerjanjian', 'BELUM_BERLANGSUNG')
+      .field('jangkaWaktuStart', '2026-06-01')
+      .field('jangkaWaktuEnd', '2026-12-31');
+    expect(res.status).toBe(500);
+  });
+
+  it('returns 400 when ADENDUM has attachment but missing vendorId on submit', async () => {
+    const adendumRequest = makeRequest({ type: 'ADENDUM', status: 'WAITING' });
+    mockRequest.create.mockResolvedValue(adendumRequest as any);
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'ADENDUM')
+      .field('submit', 'true')
+      .field('perjanjianSebelumnya', 'Old agreement')
+      .field('halYangInginDiubah', 'Change this')
+      .attach('ADENDUM_PREVIOUS_AGREEMENT', Buffer.from('data'), {
+        filename: 'agreement.pdf',
+        contentType: 'application/pdf',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/vendorId/i);
+  });
+
+  it('submits a valid SURAT draft', async () => {
+    mockProfile.findUnique.mockResolvedValue(baseProfile as any);
+    mockRequest.create.mockResolvedValue(
+      makeRequest({ type: 'SURAT', status: 'WAITING', vendorId: null, referenceNumber: '001/FIN/SRT/V/2026' }) as any,
+    );
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'SURAT')
+      .field('submit', 'true')
+      .field('suratYangHendakDibuat', 'Surat Keterangan Kerja')
+      .field('identitasPenerimaSurat', 'John Doe, Director');
+    expect(res.status).toBe(201);
+  });
+
+  it('submits a valid PERMINTAAN_DOKUMEN draft', async () => {
+    mockProfile.findUnique.mockResolvedValue(baseProfile as any);
+    mockRequest.create.mockResolvedValue(
+      makeRequest({ type: 'PERMINTAAN_DOKUMEN', status: 'WAITING', vendorId: null, referenceNumber: '001/FIN/PD/V/2026' }) as any,
+    );
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'PERMINTAAN_DOKUMEN')
+      .field('submit', 'true')
+      .field('dokumenYangDiminta', 'BPKB')
+      .field('tujuanPermintaan', 'Pengajuan Kredit');
+    expect(res.status).toBe(201);
+  });
+
+  it('submits a valid ADENDUM with attachment and vendorId', async () => {
+    mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockProfile.findUnique.mockResolvedValue(baseProfile as any);
+    const adendumRequest = makeRequest({ type: 'ADENDUM', status: 'WAITING', referenceNumber: '001/FIN/ADD/V/2026' });
+    mockRequest.create.mockResolvedValue(adendumRequest as any);
+    const res = await request(app)
+      .post('/requests')
+      .field('type', 'ADENDUM')
+      .field('submit', 'true')
+      .field('vendorId', 'vendor-1')
+      .field('perjanjianSebelumnya', 'Old agreement')
+      .field('halYangInginDiubah', 'Change clause 3')
+      .attach('ADENDUM_PREVIOUS_AGREEMENT', Buffer.from('data'), {
+        filename: 'agreement.pdf',
+        contentType: 'application/pdf',
+      });
+    expect(res.status).toBe(201);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -426,6 +596,92 @@ describe('PATCH /requests/:id', () => {
       where: { requestId: 'request-1', type: 'ADENDUM_PREVIOUS_AGREEMENT' },
     });
     expect(mockAttachment.create).toHaveBeenCalled();
+  });
+
+  it('returns 400 when vendorId provided for SURAT type in patch', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest({ type: 'SURAT', vendorId: null }) as any);
+    const res = await request(app)
+      .patch('/requests/request-1')
+      .send({ vendorId: 'vendor-1' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/vendorId/i);
+  });
+
+  it('returns 400 when vendor not found during patch', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
+    mockVendor.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .patch('/requests/request-1')
+      .send({ vendorId: 'nonexistent' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  it('updates to a valid active vendor', async () => {
+    const draft = makeRequest({ vendorId: 'vendor-1' });
+    const updated = makeRequest({ vendorId: 'vendor-2' });
+    mockRequest.findUnique
+      .mockResolvedValueOnce(draft as any)
+      .mockResolvedValueOnce(updated as any);
+    mockVendor.findUnique.mockResolvedValue({ ...baseVendor, id: 'vendor-2' } as any);
+    mockRequest.update.mockResolvedValue(updated as any);
+
+    const res = await request(app)
+      .patch('/requests/request-1')
+      .send({ vendorId: 'vendor-2' });
+
+    expect(res.status).toBe(200);
+    expect(mockRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ vendorId: 'vendor-2' }) }),
+    );
+  });
+
+  it('returns 500 when file upload fails during patch', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
+    mockStorageFrom.mockReturnValue(makeStorageBucket({ message: 'Storage error' }));
+    const res = await request(app)
+      .patch('/requests/request-1')
+      .attach('ADENDUM_PREVIOUS_AGREEMENT', Buffer.from('data'), {
+        filename: 'doc.pdf',
+        contentType: 'application/pdf',
+      });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/Failed to upload/i);
+  });
+
+  it('updates jangkaWaktuStart and jangkaWaktuEnd', async () => {
+    const draft = makeRequest();
+    const updated = makeRequest({
+      data: { ...draft.data, jangkaWaktuStart: new Date('2026-07-01'), jangkaWaktuEnd: new Date('2027-06-30') },
+    });
+    mockRequest.findUnique
+      .mockResolvedValueOnce(draft as any)
+      .mockResolvedValueOnce(updated as any);
+    mockRequest.update.mockResolvedValue(updated as any);
+    mockRequestData.update.mockResolvedValue({} as any);
+
+    const res = await request(app)
+      .patch('/requests/request-1')
+      .send({ jangkaWaktuStart: '2026-07-01', jangkaWaktuEnd: '2027-06-30' });
+
+    expect(res.status).toBe(200);
+    expect(mockRequestData.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          jangkaWaktuStart: new Date('2026-07-01'),
+          jangkaWaktuEnd: new Date('2027-06-30'),
+        }),
+      }),
+    );
+  });
+
+  it('returns 500 on unexpected database error during patch', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
+    (prisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('DB down'));
+    const res = await request(app)
+      .patch('/requests/request-1')
+      .send({ lingkupPerjanjian: 'Updated' });
+    expect(res.status).toBe(500);
   });
 });
 
@@ -521,6 +777,32 @@ describe('POST /requests/:id/submit', () => {
     const res = await request(app).post('/requests/request-1/submit');
     expect(res.status).toBe(403);
   });
+
+  it('returns 400 when linked vendor is deactivated at submit time', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
+    mockVendor.findUnique.mockResolvedValue({ ...baseVendor, isActive: false } as any);
+    const res = await request(app).post('/requests/request-1/submit');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/deactivated/i);
+  });
+
+  it('returns 400 when requestor profile is not found at submit time', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
+    mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockProfile.findUnique.mockResolvedValue(null);
+    const res = await request(app).post('/requests/request-1/submit');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/profile/i);
+  });
+
+  it('returns 500 on unexpected database error during submit', async () => {
+    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
+    mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockProfile.findUnique.mockResolvedValue(baseProfile as any);
+    (prisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('DB down'));
+    const res = await request(app).post('/requests/request-1/submit');
+    expect(res.status).toBe(500);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -591,6 +873,12 @@ describe('GET /requests', () => {
     expect(res.status).toBe(200);
     expect(res.body[0].kybBlocked).toBe(false);
   });
+
+  it('returns 500 on unexpected database error', async () => {
+    mockRequest.findMany.mockRejectedValueOnce(new Error('DB down'));
+    const res = await request(app).get('/requests');
+    expect(res.status).toBe(500);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -644,5 +932,11 @@ describe('GET /requests/:id', () => {
     mockRequest.findUnique.mockResolvedValue({ ...fullRequest, vendorId: 'vendor-1' } as any);
     const res = await request(app).get('/requests/request-1');
     expect(res.status).toBe(200);
+  });
+
+  it('returns 500 on unexpected database error', async () => {
+    mockRequest.findUnique.mockRejectedValueOnce(new Error('DB down'));
+    const res = await request(app).get('/requests/request-1');
+    expect(res.status).toBe(500);
   });
 });
