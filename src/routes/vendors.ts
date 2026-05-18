@@ -149,6 +149,42 @@ router.post(
   }
 );
 
+router.patch(
+  '/:id/deactivate',
+  authenticate,
+  requireRole(Role.IT_ADMIN),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const vendor = await prisma.vendor.findUnique({ where: { id } });
+      if (!vendor) {
+        res.status(404).json({ error: 'Vendor not found' });
+        return;
+      }
+
+      const updatedVendor = await prisma.vendor.update({
+        where: { id },
+        data: { isActive: false },
+      });
+
+      if (vendor.supabaseId) {
+        try {
+          await supabase.auth.admin.updateUserById(vendor.supabaseId, {
+            ban_duration: '876600h',
+          });
+        } catch (supabaseErr) {
+          console.error('Failed to ban vendor Supabase account:', supabaseErr);
+        }
+      }
+
+      res.json(updatedVendor);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 router.get(
   '/:id/kyb',
   authenticate,
@@ -409,6 +445,35 @@ router.post(
       });
 
       res.json({ message: 'KYB approved', kybStatus: KybStatus.APPROVED });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/:id/kyb/reset',
+  authenticate,
+  requireRole(Role.IT_ADMIN),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const vendor = await prisma.vendor.findUnique({ where: { id } });
+      if (!vendor) {
+        res.status(404).json({ error: 'Vendor not found' });
+        return;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.kybDocument.deleteMany({ where: { vendorId: id } });
+        await tx.vendor.update({
+          where: { id },
+          data: { kybStatus: KybStatus.INVITED },
+        });
+      });
+
+      res.json({ message: 'KYB reset successfully', kybStatus: KybStatus.INVITED });
     } catch (err) {
       next(err);
     }
