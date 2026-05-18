@@ -278,7 +278,7 @@ describe('POST /requests', () => {
       .field('perjanjianSebelumnya', 'Old agreement')
       .field('halYangInginDiubah', 'Change this');
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/attachment/i);
+    expect(res.body.error).toMatch(/Lampirkan Perjanjian Sebelumnya/i);
   });
 
   it('returns 500 when file upload fails', async () => {
