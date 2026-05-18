@@ -1,11 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { Role, RequestStatus, RequestType } from '@prisma/client';
+import { Role, RequestStatus } from '@prisma/client';
 import { authenticate, requireProfileComplete, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { storage } from '../lib/storage';
 import { transition, TransitionAction, WorkflowError } from '../services/workflow';
+import { isValidForFinish, stampFirstHandler } from '../services/workflow-policy';
 import {
   notifyRequestorStageAdvanced,
   notifyRequestorSentBack,
@@ -29,26 +30,6 @@ const VALID_ACTIONS: TransitionAction[] = [
   'MARK_INTERNAL_SIGNING_REQUIRED',
 ];
 
-function isValidForFinish(request: {
-  status: RequestStatus;
-  type: RequestType;
-  requiresInternalSigning: boolean;
-}): boolean {
-  if (request.status === RequestStatus.VENDOR_SIGNING) return true;
-  if (
-    (request.type === RequestType.SURAT || request.type === RequestType.PERMINTAAN_DOKUMEN) &&
-    request.status === RequestStatus.INTERNAL_SIGNING &&
-    request.requiresInternalSigning
-  )
-    return true;
-  if (
-    (request.type === RequestType.SURAT || request.type === RequestType.PERMINTAAN_DOKUMEN) &&
-    request.status === RequestStatus.LEGAL_REVIEW &&
-    !request.requiresInternalSigning
-  )
-    return true;
-  return false;
-}
 
 function sendTransitionNotification(
   result: any,
@@ -185,10 +166,7 @@ router.post(
         });
       }
 
-      const firstHandlerUpdate: Record<string, any> = {};
-      if (!request.firstHandlerId) {
-        firstHandlerUpdate.firstHandlerId = req.user!.id;
-      }
+      const firstHandlerUpdate = stampFirstHandler(req.user!, request);
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.finalDocument.createMany({

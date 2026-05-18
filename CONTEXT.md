@@ -177,6 +177,10 @@ All document collaboration (drafts, signing) happens outside the system. Only th
 
 `USER_REVIEW` is not a mandatory step — it is only entered when Legal Team explicitly sends the request back for revision. `INTERNAL_SIGNING` is optional for SURAT and PERMINTAAN_DOKUMEN.
 
+### Workflow Policy
+
+The set of rules governing which actors may take which actions from which stages, and what the resulting stage is. Rules include: role permission per action, ownership checks (Requestor may only act on their own requests), KYB gating (WAITING → LEGAL_REVIEW blocked when vendor KYB is not APPROVED), stage-specific action availability, and first-handler stamping (the first Legal Team member to act on a request is recorded). The Workflow Policy is pure — it takes a snapshot of the request and actor and either approves the transition (returning the next stage and any side-data) or rejects it with a reason.
+
 ### Queue Model
 
 All Legal Team members share a single request queue. Any Legal Team member can pick up any request. The member who first actions a request is recorded and tracked for accountability — requests are not locked to a single handler.
