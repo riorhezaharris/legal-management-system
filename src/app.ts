@@ -6,6 +6,7 @@ import slaHolidaysRouter from './routes/sla-holidays';
 import authRouter from './routes/auth';
 import vendorsRouter from './routes/vendors';
 import requestsRouter from './routes/requests';
+import workflowRouter from './routes/workflow';
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use('/admin', referenceDataRouter);
 app.use('/admin', slaHolidaysRouter);
 app.use('/vendors', vendorsRouter);
 app.use('/requests', requestsRouter);
+app.use('/requests', workflowRouter);
 
 app.use(
   (
