@@ -1,13 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { Role, RequestType, RequestStatus, StatusPerjanjian, AttachmentType } from '@prisma/client';
+import { Role, RequestType, RequestStatus, AttachmentType } from '@prisma/client';
 import { authenticate, requireProfileComplete, requireRole } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { storage } from '../lib/storage';
-import { generate as generateRefNumber } from '../services/reference-number';
-import { computeDeadline } from '../services/sla';
-import { notifyLegalTeamNewRequest } from '../services/notifications';
+import { submitDraft, SubmissionError } from '../services/request-submission';
 
 const router = Router();
 
@@ -36,38 +34,6 @@ function parseFiles(req: Request, res: Response, next: NextFunction): void {
   });
 }
 
-function validateSubmitFields(
-  type: RequestType,
-  data: Record<string, any>,
-  vendorId: string | null | undefined,
-  attachmentTypes: string[],
-): string | null {
-  switch (type) {
-    case RequestType.PERJANJIAN_BARU:
-      if (!data.lingkupPerjanjian) return 'lingkupPerjanjian is required';
-      if (!data.statusPerjanjian || !Object.values(StatusPerjanjian).includes(data.statusPerjanjian as StatusPerjanjian))
-        return 'statusPerjanjian must be BELUM_BERLANGSUNG, SEDANG_BERLANGSUNG, or SUDAH_SELESAI';
-      if (!data.jangkaWaktuStart) return 'jangkaWaktuStart is required';
-      if (!data.jangkaWaktuEnd) return 'jangkaWaktuEnd is required';
-      if (!vendorId) return 'vendorId is required for PERJANJIAN_BARU';
-      return null;
-    case RequestType.ADENDUM:
-      if (!data.perjanjianSebelumnya) return 'perjanjianSebelumnya is required';
-      if (!data.halYangInginDiubah) return 'halYangInginDiubah is required';
-      if (!attachmentTypes.includes('ADENDUM_PREVIOUS_AGREEMENT'))
-        return 'Lampirkan Perjanjian Sebelumnya is required for ADENDUM';
-      if (!vendorId) return 'vendorId is required for ADENDUM';
-      return null;
-    case RequestType.SURAT:
-      if (!data.suratYangHendakDibuat) return 'suratYangHendakDibuat is required';
-      if (!data.identitasPenerimaSurat) return 'identitasPenerimaSurat is required';
-      return null;
-    case RequestType.PERMINTAAN_DOKUMEN:
-      if (!data.dokumenYangDiminta) return 'dokumenYangDiminta is required';
-      if (!data.tujuanPermintaan) return 'tujuanPermintaan is required';
-      return null;
-  }
-}
 
 async function uploadAttachment(
   file: Express.Multer.File,
@@ -92,14 +58,6 @@ function buildVisibilityFilter(user: NonNullable<Request['user']>): Record<strin
   if (user.role === Role.REQUESTOR) return { requestorId: user.id };
   if (user.role === Role.VENDOR) return { vendorId: user.id };
   return {};
-}
-
-async function getLegalTeamEmails(): Promise<string[]> {
-  const legalUsers = await prisma.user.findMany({
-    where: { role: Role.LEGAL_TEAM, isActive: true },
-    select: { email: true },
-  });
-  return legalUsers.map(u => u.email);
 }
 
 // POST /requests
@@ -157,46 +115,14 @@ router.post(
         }
       }
 
-      if (shouldSubmit) {
-        const attachmentTypes = newAttachments.map(a => a.type as string);
-        const validationError = validateSubmitFields(type as RequestType, fields, vendorId, attachmentTypes);
-        if (validationError) {
-          res.status(400).json({ error: validationError });
-          return;
-        }
-      }
-
-      let referenceNumber: string | null = null;
-      let submittedAt: Date | null = null;
-      let slaDeadline: Date | null = null;
-
-      if (shouldSubmit) {
-        const profile = await prisma.requestorProfile.findUnique({
-          where: { userId: req.user!.id },
-          include: { divisi: true },
-        });
-        if (!profile) {
-          res.status(400).json({ error: 'Requestor profile is required to submit a request' });
-          return;
-        }
-
-        submittedAt = new Date();
-        referenceNumber = await generateRefNumber(profile.divisi.code, type as RequestType, submittedAt);
-        const slaConfig = await prisma.slaConfig.findUnique({ where: { id: 'singleton' } });
-        slaDeadline = await computeDeadline(submittedAt, slaConfig?.workingDays ?? 5);
-      }
-
       const request = await prisma.$transaction(async (tx) => {
-        const created = await tx.legalRequest.create({
+        return tx.legalRequest.create({
           data: {
             id: requestId,
             requestorId: req.user!.id,
             type: type as RequestType,
-            status: shouldSubmit ? RequestStatus.WAITING : RequestStatus.DRAFT,
-            referenceNumber,
+            status: RequestStatus.DRAFT,
             vendorId: vendorId ?? null,
-            submittedAt,
-            slaDeadline,
             data: {
               create: {
                 lingkupPerjanjian: fields.lingkupPerjanjian ?? null,
@@ -221,28 +147,20 @@ router.post(
             vendor: { select: { id: true, name: true, kybStatus: true } },
           },
         });
-
-        if (shouldSubmit) {
-          await tx.stageHistory.create({
-            data: {
-              requestId,
-              fromStage: null,
-              toStage: RequestStatus.WAITING,
-              actorId: req.user!.id,
-            },
-          });
-        }
-
-        return created;
       });
 
-      if (shouldSubmit && request.referenceNumber) {
-        const legalEmails = await getLegalTeamEmails();
-        notifyLegalTeamNewRequest(legalEmails, request.referenceNumber);
+      if (shouldSubmit) {
+        const submitted = await submitDraft(requestId, req.user!.id);
+        res.status(201).json(submitted);
+        return;
       }
 
       res.status(201).json(request);
     } catch (err) {
+      if (err instanceof SubmissionError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   },
@@ -369,89 +287,13 @@ router.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { id } = req.params;
-
-      const request = await prisma.legalRequest.findUnique({
-        where: { id },
-        include: { data: true, attachments: true },
-      });
-
-      if (!request) {
-        res.status(404).json({ error: 'Request not found' });
-        return;
-      }
-
-      if (request.requestorId !== req.user!.id) {
-        res.status(403).json({ error: 'Forbidden' });
-        return;
-      }
-
-      if (request.status !== RequestStatus.DRAFT) {
-        res.status(400).json({ error: 'Only DRAFT requests can be submitted' });
-        return;
-      }
-
-      const attachmentTypes = request.attachments.map(a => a.type as string);
-      const validationError = validateSubmitFields(
-        request.type,
-        request.data ?? {},
-        request.vendorId,
-        attachmentTypes,
-      );
-      if (validationError) {
-        res.status(400).json({ error: validationError });
-        return;
-      }
-
-      if (request.vendorId) {
-        const vendor = await prisma.vendor.findUnique({ where: { id: request.vendorId } });
-        if (!vendor || !vendor.isActive) {
-          res.status(400).json({ error: 'Linked vendor is deactivated' });
-          return;
-        }
-      }
-
-      const profile = await prisma.requestorProfile.findUnique({
-        where: { userId: req.user!.id },
-        include: { divisi: true },
-      });
-      if (!profile) {
-        res.status(400).json({ error: 'Requestor profile is required to submit a request' });
-        return;
-      }
-
-      const submittedAt = new Date();
-      const referenceNumber = await generateRefNumber(profile.divisi.code, request.type, submittedAt);
-      const slaConfig = await prisma.slaConfig.findUnique({ where: { id: 'singleton' } });
-      const slaDeadline = await computeDeadline(submittedAt, slaConfig?.workingDays ?? 5);
-
-      const updated = await prisma.$transaction(async (tx) => {
-        const updatedRequest = await tx.legalRequest.update({
-          where: { id },
-          data: { status: RequestStatus.WAITING, referenceNumber, submittedAt, slaDeadline },
-          include: {
-            data: true,
-            attachments: true,
-            vendor: { select: { id: true, name: true, kybStatus: true } },
-          },
-        });
-
-        await tx.stageHistory.create({
-          data: {
-            requestId: id,
-            fromStage: null,
-            toStage: RequestStatus.WAITING,
-            actorId: req.user!.id,
-          },
-        });
-
-        return updatedRequest;
-      });
-
-      const legalEmails = await getLegalTeamEmails();
-      notifyLegalTeamNewRequest(legalEmails, referenceNumber);
-
-      res.json(updated);
+      const result = await submitDraft(id, req.user!.id);
+      res.json(result);
     } catch (err) {
+      if (err instanceof SubmissionError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   },

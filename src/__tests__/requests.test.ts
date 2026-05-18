@@ -146,7 +146,7 @@ const makeRequest = (overrides: Record<string, any> = {}) => ({
     tujuanPermintaan: null,
   },
   attachments: [],
-  vendor: { id: 'vendor-1', name: 'Test Vendor', kybStatus: 'APPROVED' },
+  vendor: { id: 'vendor-1', name: 'Test Vendor', kybStatus: 'APPROVED', isActive: true },
   ...overrides,
 });
 
@@ -178,7 +178,7 @@ describe('POST /requests', () => {
     expect(res.status).toBe(201);
     expect(mockRequest.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'DRAFT', referenceNumber: null }),
+        data: expect.objectContaining({ status: 'DRAFT' }),
       }),
     );
   });
@@ -186,8 +186,10 @@ describe('POST /requests', () => {
   it('creates a WAITING request when submit=true with all required fields', async () => {
     mockVendor.findUnique.mockResolvedValue(baseVendor as any);
     mockProfile.findUnique.mockResolvedValue(baseProfile as any);
-    const submittedRequest = makeRequest({ status: 'WAITING', referenceNumber: '001/FIN/PB/V/2026' });
-    mockRequest.create.mockResolvedValue(submittedRequest as any);
+    mockRequest.findUnique.mockResolvedValueOnce(makeRequest() as any);
+    mockRequest.update.mockResolvedValue(
+      makeRequest({ status: 'WAITING', referenceNumber: '001/FIN/PB/V/2026' }) as any,
+    );
 
     const res = await request(app)
       .post('/requests')
@@ -201,6 +203,11 @@ describe('POST /requests', () => {
 
     expect(res.status).toBe(201);
     expect(mockRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'DRAFT' }),
+      }),
+    );
+    expect(mockRequest.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'WAITING', referenceNumber: '001/FIN/PB/V/2026' }),
       }),
@@ -256,6 +263,7 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when PERJANJIAN_BARU missing vendorId on submit', async () => {
+    mockRequest.findUnique.mockResolvedValueOnce(makeRequest({ vendorId: null, vendor: null }) as any);
     const res = await request(app)
       .post('/requests')
       .field('type', 'PERJANJIAN_BARU')
@@ -270,6 +278,14 @@ describe('POST /requests', () => {
 
   it('returns 400 when ADENDUM missing attachment on submit', async () => {
     mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'ADENDUM',
+        vendorId: 'vendor-1',
+        attachments: [],
+        data: { ...makeRequest().data, perjanjianSebelumnya: 'Old agreement', halYangInginDiubah: 'Change this' },
+      }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'ADENDUM')
@@ -327,7 +343,8 @@ describe('POST /requests', () => {
     mockVendor.findUnique.mockResolvedValue(baseVendor as any);
     mockProfile.findUnique.mockResolvedValue(baseProfile as any);
     mockUser.findMany.mockResolvedValue([{ email: 'legal@example.com' }] as any);
-    mockRequest.create.mockResolvedValue(
+    mockRequest.findUnique.mockResolvedValueOnce(makeRequest() as any);
+    mockRequest.update.mockResolvedValue(
       makeRequest({ status: 'WAITING', referenceNumber: '001/FIN/PB/V/2026' }) as any,
     );
 
@@ -373,6 +390,9 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when PERJANJIAN_BARU has invalid statusPerjanjian on submit', async () => {
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({ vendorId: null, vendor: null, data: { ...makeRequest().data, statusPerjanjian: 'INVALID_STATUS' } }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'PERJANJIAN_BARU')
@@ -386,6 +406,9 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when SURAT is missing suratYangHendakDibuat on submit', async () => {
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({ type: 'SURAT', vendorId: null, vendor: null }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'SURAT')
@@ -395,6 +418,12 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when SURAT is missing identitasPenerimaSurat on submit', async () => {
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'SURAT', vendorId: null, vendor: null,
+        data: { ...makeRequest().data, suratYangHendakDibuat: 'Surat Keterangan' },
+      }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'SURAT')
@@ -405,6 +434,9 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when PERMINTAAN_DOKUMEN is missing dokumenYangDiminta on submit', async () => {
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({ type: 'PERMINTAAN_DOKUMEN', vendorId: null, vendor: null }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'PERMINTAAN_DOKUMEN')
@@ -414,6 +446,12 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when PERMINTAAN_DOKUMEN is missing tujuanPermintaan on submit', async () => {
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'PERMINTAAN_DOKUMEN', vendorId: null, vendor: null,
+        data: { ...makeRequest().data, dokumenYangDiminta: 'BPKB' },
+      }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'PERMINTAAN_DOKUMEN')
@@ -425,6 +463,7 @@ describe('POST /requests', () => {
 
   it('returns 400 when requestor profile is not found on submit', async () => {
     mockVendor.findUnique.mockResolvedValue(baseVendor as any);
+    mockRequest.findUnique.mockResolvedValueOnce(makeRequest() as any);
     mockProfile.findUnique.mockResolvedValue(null);
     const res = await request(app)
       .post('/requests')
@@ -456,8 +495,15 @@ describe('POST /requests', () => {
   });
 
   it('returns 400 when ADENDUM has attachment but missing vendorId on submit', async () => {
-    const adendumRequest = makeRequest({ type: 'ADENDUM', status: 'WAITING' });
-    mockRequest.create.mockResolvedValue(adendumRequest as any);
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'ADENDUM',
+        vendorId: null,
+        vendor: null,
+        attachments: [{ type: 'ADENDUM_PREVIOUS_AGREEMENT', fileUrl: 'https://storage.example.com/agreement.pdf', fileName: 'agreement.pdf', fileSize: 100 }],
+        data: { ...makeRequest().data, perjanjianSebelumnya: 'Old agreement', halYangInginDiubah: 'Change this' },
+      }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'ADENDUM')
@@ -474,7 +520,13 @@ describe('POST /requests', () => {
 
   it('submits a valid SURAT draft', async () => {
     mockProfile.findUnique.mockResolvedValue(baseProfile as any);
-    mockRequest.create.mockResolvedValue(
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'SURAT', vendorId: null, vendor: null,
+        data: { ...makeRequest().data, suratYangHendakDibuat: 'Surat Keterangan Kerja', identitasPenerimaSurat: 'John Doe, Director' },
+      }) as any,
+    );
+    mockRequest.update.mockResolvedValue(
       makeRequest({ type: 'SURAT', status: 'WAITING', vendorId: null, referenceNumber: '001/FIN/SRT/V/2026' }) as any,
     );
     const res = await request(app)
@@ -488,7 +540,13 @@ describe('POST /requests', () => {
 
   it('submits a valid PERMINTAAN_DOKUMEN draft', async () => {
     mockProfile.findUnique.mockResolvedValue(baseProfile as any);
-    mockRequest.create.mockResolvedValue(
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'PERMINTAAN_DOKUMEN', vendorId: null, vendor: null,
+        data: { ...makeRequest().data, dokumenYangDiminta: 'BPKB', tujuanPermintaan: 'Pengajuan Kredit' },
+      }) as any,
+    );
+    mockRequest.update.mockResolvedValue(
       makeRequest({ type: 'PERMINTAAN_DOKUMEN', status: 'WAITING', vendorId: null, referenceNumber: '001/FIN/PD/V/2026' }) as any,
     );
     const res = await request(app)
@@ -503,8 +561,16 @@ describe('POST /requests', () => {
   it('submits a valid ADENDUM with attachment and vendorId', async () => {
     mockVendor.findUnique.mockResolvedValue(baseVendor as any);
     mockProfile.findUnique.mockResolvedValue(baseProfile as any);
-    const adendumRequest = makeRequest({ type: 'ADENDUM', status: 'WAITING', referenceNumber: '001/FIN/ADD/V/2026' });
-    mockRequest.create.mockResolvedValue(adendumRequest as any);
+    mockRequest.findUnique.mockResolvedValueOnce(
+      makeRequest({
+        type: 'ADENDUM',
+        attachments: [{ type: 'ADENDUM_PREVIOUS_AGREEMENT', fileUrl: 'https://storage.example.com/agreement.pdf', fileName: 'agreement.pdf', fileSize: 100 }],
+        data: { ...makeRequest().data, perjanjianSebelumnya: 'Old agreement', halYangInginDiubah: 'Change clause 3' },
+      }) as any,
+    );
+    mockRequest.update.mockResolvedValue(
+      makeRequest({ type: 'ADENDUM', status: 'WAITING', referenceNumber: '001/FIN/ADD/V/2026' }) as any,
+    );
     const res = await request(app)
       .post('/requests')
       .field('type', 'ADENDUM')
@@ -779,8 +845,9 @@ describe('POST /requests/:id/submit', () => {
   });
 
   it('returns 400 when linked vendor is deactivated at submit time', async () => {
-    mockRequest.findUnique.mockResolvedValue(makeRequest() as any);
-    mockVendor.findUnique.mockResolvedValue({ ...baseVendor, isActive: false } as any);
+    mockRequest.findUnique.mockResolvedValue(
+      makeRequest({ vendor: { id: 'vendor-1', name: 'Test Vendor', kybStatus: 'APPROVED', isActive: false } }) as any,
+    );
     const res = await request(app).post('/requests/request-1/submit');
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/deactivated/i);
