@@ -11,6 +11,7 @@ import {
   notifyLegalTeamKybResubmitted,
   notifyVendorKybRevision,
 } from '../services/notifications';
+import { evaluateKyb, KybError } from '../services/kyb-policy';
 
 const router = Router();
 
@@ -232,15 +233,14 @@ router.post(
         return;
       }
 
-      if (req.user!.id !== id) {
-        res.status(403).json({ error: 'Forbidden' });
-        return;
-      }
-
-      const allowedFromStatuses: KybStatus[] = [KybStatus.INVITED, KybStatus.REVISION, KybStatus.APPROVED];
-      if (!allowedFromStatuses.includes(vendor.kybStatus)) {
-        res.status(400).json({ error: `Cannot submit KYB from status ${vendor.kybStatus}` });
-        return;
+      try {
+        evaluateKyb('SUBMIT', req.user!, { id, kybStatus: vendor.kybStatus });
+      } catch (policyErr) {
+        if (policyErr instanceof KybError) {
+          res.status(policyErr.statusCode).json({ error: policyErr.message });
+          return;
+        }
+        throw policyErr;
       }
 
       const vendorType = (type as VendorType | undefined) ?? vendor.type;
@@ -350,27 +350,27 @@ router.post(
       const { id } = req.params;
       const { remarks } = req.body as { remarks?: string };
 
-      if (!remarks?.trim()) {
-        res.status(400).json({ error: 'remarks is required' });
-        return;
-      }
-
       const vendor = await prisma.vendor.findUnique({ where: { id } });
       if (!vendor) {
         res.status(404).json({ error: 'Vendor not found' });
         return;
       }
 
-      if (vendor.kybStatus !== KybStatus.SUBMITTED) {
-        res.status(400).json({ error: `Cannot request revision from status ${vendor.kybStatus}` });
-        return;
+      try {
+        evaluateKyb('REQUEST_REVISION', req.user!, { id, kybStatus: vendor.kybStatus }, { remarks });
+      } catch (policyErr) {
+        if (policyErr instanceof KybError) {
+          res.status(policyErr.statusCode).json({ error: policyErr.message });
+          return;
+        }
+        throw policyErr;
       }
 
       await prisma.$transaction(async (tx) => {
         await tx.kybReview.create({
           data: {
             vendorId: id,
-            remarks: remarks.trim(),
+            remarks: remarks!.trim(),
             createdById: req.user!.id,
           },
         });
@@ -380,7 +380,7 @@ router.post(
         });
       });
 
-      notifyVendorKybRevision(vendor.email, remarks.trim());
+      notifyVendorKybRevision(vendor.email, remarks!.trim());
 
       res.json({ message: 'Revision request sent', kybStatus: KybStatus.REVISION });
     } catch (err) {
@@ -403,9 +403,14 @@ router.post(
         return;
       }
 
-      if (vendor.kybStatus !== KybStatus.SUBMITTED) {
-        res.status(400).json({ error: `Cannot approve from status ${vendor.kybStatus}` });
-        return;
+      try {
+        evaluateKyb('APPROVE', req.user!, { id, kybStatus: vendor.kybStatus });
+      } catch (policyErr) {
+        if (policyErr instanceof KybError) {
+          res.status(policyErr.statusCode).json({ error: policyErr.message });
+          return;
+        }
+        throw policyErr;
       }
 
       await prisma.vendor.update({
@@ -432,6 +437,16 @@ router.post(
       if (!vendor) {
         res.status(404).json({ error: 'Vendor not found' });
         return;
+      }
+
+      try {
+        evaluateKyb('RESET', req.user!, { id, kybStatus: vendor.kybStatus });
+      } catch (policyErr) {
+        if (policyErr instanceof KybError) {
+          res.status(policyErr.statusCode).json({ error: policyErr.message });
+          return;
+        }
+        throw policyErr;
       }
 
       await prisma.$transaction(async (tx) => {
