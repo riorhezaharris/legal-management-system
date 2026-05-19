@@ -1,0 +1,2079 @@
+openapi: 3.1.0
+info:
+  title: Cikal Legal Management System API
+  description: |
+    API for the Cikal Legal Management System — handles vendor KYB, legal request workflows,
+    user/admin management, and SLA configuration.
+
+    ## Authentication
+    All protected endpoints require a Supabase-issued JWT passed as a Bearer token.
+
+    ## Roles
+    | Role | Description |
+    |------|-------------|
+    | `IT_ADMIN` | Full system access, user/vendor management, reference data |
+    | `REQUESTOR` | Internal staff who create and track legal requests |
+    | `LEGAL_TEAM` | Lawyers who review, approve, and process requests |
+    | `VENDOR` | External counterparties who complete KYB and review vendor-facing requests |
+  version: 1.0.0
+  contact:
+    name: Rio Rheza Harris
+    email: rio@transfez.com
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Health
+    description: Liveness probe
+  - name: Auth
+    description: Authentication callbacks
+  - name: Users
+    description: Internal user management
+  - name: Profile
+    description: Requestor profile completion
+  - name: Vendors
+    description: Vendor directory and KYB workflow
+  - name: Requests
+    description: Legal request lifecycle
+  - name: Workflow
+    description: Request stage transitions and final documents
+  - name: Admin — Reference Data
+    description: Office locations, divisions, and business units
+  - name: Admin — SLA & Holidays
+    description: SLA working-day config and public/custom holidays
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Health
+  # ---------------------------------------------------------------------------
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: Service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, timestamp]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  # ---------------------------------------------------------------------------
+  # Auth
+  # ---------------------------------------------------------------------------
+  /auth/callback:
+    get:
+      operationId: authCallback
+      summary: Supabase OAuth callback (internal)
+      tags:
+        - Auth
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect after successful authentication
+
+  # ---------------------------------------------------------------------------
+  # Users
+  # ---------------------------------------------------------------------------
+  /users:
+    post:
+      operationId: createUser
+      summary: Create a new internal user
+      description: IT_ADMIN only. Creates a REQUESTOR or LEGAL_TEAM account and sends an invitation email via Supabase.
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security:
+        - bearerAuth: []
+
+    get:
+      operationId: listUsers
+      summary: List all internal users
+      description: IT_ADMIN only.
+      tags:
+        - Users
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    patch:
+      operationId: updateUser
+      summary: Update user role
+      description: IT_ADMIN only.
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: "#/components/schemas/Role"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /users/{id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    patch:
+      operationId: deactivateUser
+      summary: Deactivate a user account
+      description: IT_ADMIN only. Sets `isActive` to false; the user can no longer authenticate.
+      tags:
+        - Users
+      responses:
+        "200":
+          description: User deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  # ---------------------------------------------------------------------------
+  # Profile
+  # ---------------------------------------------------------------------------
+  /users/complete-profile:
+    post:
+      operationId: completeProfile
+      summary: Complete Requestor profile (first-login)
+      description: REQUESTOR only. Must be called before the user can create requests. Sets `profileCompleted = true`.
+      tags:
+        - Profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteProfileRequest"
+      responses:
+        "200":
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestorProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /users/profile:
+    patch:
+      operationId: updateProfile
+      summary: Update Requestor profile
+      description: REQUESTOR only. Requires profile to already be complete.
+      tags:
+        - Profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestorProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  # ---------------------------------------------------------------------------
+  # Vendors
+  # ---------------------------------------------------------------------------
+  /vendors:
+    get:
+      operationId: listVendors
+      summary: List active vendors
+      description: Accessible by REQUESTOR, IT_ADMIN, LEGAL_TEAM. Supports optional name filter.
+      tags:
+        - Vendors
+      parameters:
+        - name: name
+          in: query
+          description: Partial name filter (case-insensitive)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vendor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /vendors/invite:
+    post:
+      operationId: inviteVendor
+      summary: Invite a vendor or fetch existing
+      description: Sends a Supabase invitation email to the vendor. If the email already exists, returns the existing vendor.
+      tags:
+        - Vendors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Existing vendor returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "201":
+          description: New vendor invited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /vendors/{id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    patch:
+      operationId: deactivateVendor
+      summary: Deactivate a vendor
+      description: IT_ADMIN only.
+      tags:
+        - Vendors
+      responses:
+        "200":
+          description: Vendor deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /vendors/{id}/kyb:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    get:
+      operationId: getVendorKyb
+      summary: Get vendor KYB status and documents
+      description: Accessible by VENDOR (own record), LEGAL_TEAM, IT_ADMIN.
+      tags:
+        - Vendors
+      responses:
+        "200":
+          description: Vendor KYB detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorKyb"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+    post:
+      operationId: submitVendorKyb
+      summary: Submit / update KYB documents
+      description: |
+        VENDOR only. Multipart form upload — include one file per document type.
+        All previously submitted documents for included types are replaced.
+
+        Accepted document types: `AKTA_PENDIRIAN`, `SK_PENDIRIAN`, `NIB`, `KTP_PENANGGUNG_JAWAB`,
+        `NPWP_BADAN`, `AKTA_PERUBAHAN_DIREKSI`, `SK_PERUBAHAN_DIREKSI`, `SURAT_KUASA`, `KTP`, `NPWP`.
+
+        Max file size: 20 MB per file.
+      tags:
+        - Vendors
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/KybDocumentUpload"
+      responses:
+        "200":
+          description: KYB documents submitted; vendor status moves to SUBMITTED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorKyb"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /vendors/{id}/kyb/revision:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    post:
+      operationId: requestKybRevision
+      summary: Request KYB revision
+      description: LEGAL_TEAM only. Moves vendor to REVISION status and records remarks.
+      tags:
+        - Vendors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [remarks]
+              properties:
+                remarks:
+                  type: string
+      responses:
+        "200":
+          description: Revision requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorKyb"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /vendors/{id}/kyb/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    post:
+      operationId: approveKyb
+      summary: Approve vendor KYB
+      description: LEGAL_TEAM only. Moves vendor to APPROVED status.
+      tags:
+        - Vendors
+      responses:
+        "200":
+          description: KYB approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorKyb"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /vendors/{id}/kyb/reset:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    post:
+      operationId: resetKyb
+      summary: Reset vendor KYB to INVITED
+      description: IT_ADMIN only. Clears all KYB documents and resets status.
+      tags:
+        - Vendors
+      responses:
+        "200":
+          description: KYB reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorKyb"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  # ---------------------------------------------------------------------------
+  # Requests
+  # ---------------------------------------------------------------------------
+  /requests:
+    post:
+      operationId: createRequest
+      summary: Create a new legal request
+      description: |
+        REQUESTOR only (profile must be complete).
+
+        Set `submit: true` to immediately submit the request into the workflow;
+        otherwise it is saved as a DRAFT.
+
+        Required fields vary by `type`:
+        - `PERJANJIAN_BARU` — `vendorId`, `lingkupPerjanjian`
+        - `ADENDUM` — `vendorId`, `lingkupPerjanjian`, `perjanjianSebelumnya`, `halYangInginDiubah`; attach `ADENDUM_PREVIOUS_AGREEMENT`
+        - `SURAT` — `vendorId`, `suratYangHendakDibuat`, `identitasPenerimaSurat`; optional `SURAT_PRIOR_CORRESPONDENCE`
+        - `PERMINTAAN_DOKUMEN` — `vendorId`, `dokumenYangDiminta`, `tujuanPermintaan`; optional `PERMINTAAN_SUPPORTING_DOC`
+      tags:
+        - Requests
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CreateRequestBody"
+      responses:
+        "201":
+          description: Request created (DRAFT or WAITING depending on `submit`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+    get:
+      operationId: listRequests
+      summary: List legal requests
+      description: |
+        Visibility is filtered by role:
+        - REQUESTOR — only their own requests
+        - VENDOR — only requests linked to their vendor record
+        - LEGAL_TEAM / IT_ADMIN — all requests
+      tags:
+        - Requests
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/RequestStatus"
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/RequestType"
+      responses:
+        "200":
+          description: List of requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LegalRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /requests/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    get:
+      operationId: getRequest
+      summary: Get a single legal request
+      tags:
+        - Requests
+      responses:
+        "200":
+          description: Request detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+    patch:
+      operationId: updateRequest
+      summary: Update a DRAFT request
+      description: REQUESTOR only. Only allowed while the request is in DRAFT status.
+      tags:
+        - Requests
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UpdateRequestBody"
+      responses:
+        "200":
+          description: Request updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /requests/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    post:
+      operationId: submitRequest
+      summary: Submit a DRAFT request into the workflow
+      description: REQUESTOR only. Moves request from DRAFT to WAITING and notifies the legal team.
+      tags:
+        - Requests
+      responses:
+        "200":
+          description: Request submitted (status becomes WAITING)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  # ---------------------------------------------------------------------------
+  # Workflow
+  # ---------------------------------------------------------------------------
+  /requests/{id}/transition:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    post:
+      operationId: transitionRequest
+      summary: Execute a workflow transition
+      description: |
+        Available actions and their allowed roles / source statuses:
+
+        | Action | Roles | From Status |
+        |--------|-------|-------------|
+        | `ADVANCE` | LEGAL_TEAM, REQUESTOR | Most non-terminal statuses |
+        | `SEND_BACK` | LEGAL_TEAM | LEGAL_REVIEW |
+        | `CANCEL` | REQUESTOR | DRAFT, WAITING |
+        | `REJECT` | LEGAL_TEAM | LEGAL_REVIEW, WAITING |
+        | `CONFIRM_VENDOR` | LEGAL_TEAM | VENDOR_REVIEW |
+        | `MARK_INTERNAL_SIGNING_REQUIRED` | LEGAL_TEAM | LEGAL_REVIEW |
+      tags:
+        - Workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionRequest"
+      responses:
+        "200":
+          description: Request after transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /requests/{id}/documents:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    post:
+      operationId: uploadFinalDocuments
+      summary: Upload final signed documents
+      description: LEGAL_TEAM only. Attaches final documents and marks the request as FINISHED.
+      tags:
+        - Workflow
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [documents]
+              properties:
+                documents:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: One or more signed document files (max 20 MB each)
+      responses:
+        "200":
+          description: Request finished; final documents attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  # ---------------------------------------------------------------------------
+  # Admin — Reference Data
+  # ---------------------------------------------------------------------------
+  /admin/lokasi-kantor:
+    get:
+      operationId: listLokasiKantor
+      summary: List office locations
+      tags:
+        - Admin — Reference Data
+      responses:
+        "200":
+          description: List of office locations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LokasiKantor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+    post:
+      operationId: createLokasiKantor
+      summary: Create an office location
+      tags:
+        - Admin — Reference Data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LokasiKantor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /admin/lokasi-kantor/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    patch:
+      operationId: updateLokasiKantor
+      summary: Update an office location
+      tags:
+        - Admin — Reference Data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LokasiKantor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+    delete:
+      operationId: deleteLokasiKantor
+      summary: Delete an office location
+      description: Blocked if any requestor profiles reference this location.
+      tags:
+        - Admin — Reference Data
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /admin/divisi:
+    get:
+      operationId: listDivisi
+      summary: List divisions
+      tags:
+        - Admin — Reference Data
+      responses:
+        "200":
+          description: List of divisions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Divisi"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+    post:
+      operationId: createDivisi
+      summary: Create a division
+      description: Code must be uppercase alphanumeric, max 5 characters.
+      tags:
+        - Admin — Reference Data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code]
+              properties:
+                name:
+                  type: string
+                code:
+                  type: string
+                  pattern: "^[A-Z0-9]{1,5}$"
+                  description: Uppercase alphanumeric, max 5 chars
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Divisi"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      security:
+        - bearerAuth: []
+
+  /admin/divisi/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    patch:
+      operationId: updateDivisi
+      summary: Update a division
+      tags:
+        - Admin — Reference Data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                code:
+                  type: string
+                  pattern: "^[A-Z0-9]{1,5}$"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Divisi"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      security:
+        - bearerAuth: []
+
+    delete:
+      operationId: deleteDivisi
+      summary: Delete a division
+      description: Blocked if any requestor profiles reference this division.
+      tags:
+        - Admin — Reference Data
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /admin/unit-bisnis:
+    get:
+      operationId: listUnitBisnis
+      summary: List business units
+      tags:
+        - Admin — Reference Data
+      responses:
+        "200":
+          description: List of business units
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UnitBisnis"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+    post:
+      operationId: createUnitBisnis
+      summary: Create a business unit
+      tags:
+        - Admin — Reference Data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitBisnis"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /admin/unit-bisnis/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    patch:
+      operationId: updateUnitBisnis
+      summary: Update a business unit
+      tags:
+        - Admin — Reference Data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitBisnis"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+    delete:
+      operationId: deleteUnitBisnis
+      summary: Delete a business unit
+      description: Blocked if any requestor profiles reference this business unit.
+      tags:
+        - Admin — Reference Data
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  # ---------------------------------------------------------------------------
+  # Admin — SLA & Holidays
+  # ---------------------------------------------------------------------------
+  /admin/sla-config:
+    get:
+      operationId: getSlaConfig
+      summary: Get SLA configuration
+      description: Returns the singleton SLA config (creates it with default 5 working days if not yet initialized).
+      tags:
+        - Admin — SLA & Holidays
+      responses:
+        "200":
+          description: SLA config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlaConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+    post:
+      operationId: updateSlaConfig
+      summary: Update SLA working days
+      tags:
+        - Admin — SLA & Holidays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workingDays]
+              properties:
+                workingDays:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: Updated SLA config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlaConfig"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+  /admin/holidays:
+    get:
+      operationId: listHolidays
+      summary: List holidays
+      tags:
+        - Admin — SLA & Holidays
+      parameters:
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/HolidayType"
+      responses:
+        "200":
+          description: List of holidays
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Holiday"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      security:
+        - bearerAuth: []
+
+    post:
+      operationId: createHoliday
+      summary: Create a holiday
+      tags:
+        - Admin — SLA & Holidays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHolidayRequest"
+      responses:
+        "201":
+          description: Holiday created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Holiday"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      security:
+        - bearerAuth: []
+
+  /admin/holidays/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdParam"
+
+    delete:
+      operationId: deleteHoliday
+      summary: Delete a holiday
+      tags:
+        - Admin — SLA & Holidays
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+
+  # ---------------------------------------------------------------------------
+  # Schemas
+  # ---------------------------------------------------------------------------
+  schemas:
+
+    # Enums
+    Role:
+      type: string
+      enum: [IT_ADMIN, REQUESTOR, LEGAL_TEAM, VENDOR]
+
+    KybStatus:
+      type: string
+      enum: [INVITED, SUBMITTED, REVISION, APPROVED]
+
+    VendorType:
+      type: string
+      enum: [BADAN, PERORANGAN]
+
+    RequestType:
+      type: string
+      enum: [PERJANJIAN_BARU, ADENDUM, SURAT, PERMINTAAN_DOKUMEN]
+
+    RequestStatus:
+      type: string
+      enum:
+        - DRAFT
+        - WAITING
+        - LEGAL_REVIEW
+        - USER_REVIEW
+        - VENDOR_REVIEW
+        - INTERNAL_SIGNING
+        - VENDOR_SIGNING
+        - FINISHED
+        - CANCELLED
+        - REJECTED
+
+    StatusPerjanjian:
+      type: string
+      enum: [BELUM_BERLANGSUNG, SEDANG_BERLANGSUNG, SUDAH_SELESAI]
+
+    HolidayType:
+      type: string
+      enum: [NATIONAL, CUSTOM]
+
+    KybDocumentType:
+      type: string
+      enum:
+        - AKTA_PENDIRIAN
+        - SK_PENDIRIAN
+        - NIB
+        - KTP_PENANGGUNG_JAWAB
+        - NPWP_BADAN
+        - AKTA_PERUBAHAN_DIREKSI
+        - SK_PERUBAHAN_DIREKSI
+        - SURAT_KUASA
+        - KTP
+        - NPWP
+
+    AttachmentType:
+      type: string
+      enum:
+        - ADENDUM_PREVIOUS_AGREEMENT
+        - SURAT_PRIOR_CORRESPONDENCE
+        - PERMINTAAN_SUPPORTING_DOC
+
+    TransitionAction:
+      type: string
+      enum:
+        - ADVANCE
+        - SEND_BACK
+        - CANCEL
+        - REJECT
+        - CONFIRM_VENDOR
+        - MARK_INTERNAL_SIGNING_REQUIRED
+
+    # Entities
+    User:
+      type: object
+      required: [id, supabaseId, email, name, role, isActive, profileCompleted, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        supabaseId:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        isActive:
+          type: boolean
+        profileCompleted:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    RequestorProfile:
+      type: object
+      required: [id, userId, namaLengkap, lokasiKantorId, divisiId, unitBisnisId, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        userId:
+          type: string
+          format: uuid
+        namaLengkap:
+          type: string
+        lokasiKantorId:
+          type: string
+          format: uuid
+        divisiId:
+          type: string
+          format: uuid
+        unitBisnisId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    Vendor:
+      type: object
+      required: [id, email, name, kybStatus, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        supabaseId:
+          type: string
+          nullable: true
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        address:
+          type: string
+          nullable: true
+        type:
+          $ref: "#/components/schemas/VendorType"
+          nullable: true
+        kybStatus:
+          $ref: "#/components/schemas/KybStatus"
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    KybDocument:
+      type: object
+      required: [id, vendorId, documentType, fileUrl, fileName, fileSize, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        vendorId:
+          type: string
+          format: uuid
+        documentType:
+          $ref: "#/components/schemas/KybDocumentType"
+        fileUrl:
+          type: string
+          format: uri
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+          description: File size in bytes
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    KybReview:
+      type: object
+      required: [id, vendorId, remarks, createdById, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        vendorId:
+          type: string
+          format: uuid
+        remarks:
+          type: string
+        createdById:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    VendorKyb:
+      type: object
+      description: Vendor with KYB documents and review history
+      allOf:
+        - $ref: "#/components/schemas/Vendor"
+        - type: object
+          properties:
+            kybDocuments:
+              type: array
+              items:
+                $ref: "#/components/schemas/KybDocument"
+            kybReviews:
+              type: array
+              items:
+                $ref: "#/components/schemas/KybReview"
+
+    LegalRequestData:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requestId:
+          type: string
+          format: uuid
+        lingkupPerjanjian:
+          type: string
+          nullable: true
+        statusPerjanjian:
+          $ref: "#/components/schemas/StatusPerjanjian"
+          nullable: true
+        jangkaWaktuStart:
+          type: string
+          format: date-time
+          nullable: true
+        jangkaWaktuEnd:
+          type: string
+          format: date-time
+          nullable: true
+        perjanjianSebelumnya:
+          type: string
+          nullable: true
+        halYangInginDiubah:
+          type: string
+          nullable: true
+        suratYangHendakDibuat:
+          type: string
+          nullable: true
+        identitasPenerimaSurat:
+          type: string
+          nullable: true
+        dokumenYangDiminta:
+          type: string
+          nullable: true
+        tujuanPermintaan:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    LegalRequestAttachment:
+      type: object
+      required: [id, requestId, type, fileUrl, fileName, fileSize, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requestId:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/AttachmentType"
+        fileUrl:
+          type: string
+          format: uri
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+          description: File size in bytes
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    FinalDocument:
+      type: object
+      required: [id, requestId, fileUrl, fileName, fileSize, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requestId:
+          type: string
+          format: uuid
+        fileUrl:
+          type: string
+          format: uri
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+          description: File size in bytes
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    StageHistory:
+      type: object
+      required: [id, requestId, toStage, actorId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requestId:
+          type: string
+          format: uuid
+        fromStage:
+          $ref: "#/components/schemas/RequestStatus"
+          nullable: true
+        toStage:
+          $ref: "#/components/schemas/RequestStatus"
+        actorId:
+          type: string
+          format: uuid
+        remarks:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    LegalRequest:
+      type: object
+      required: [id, requestorId, type, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        requestorId:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/RequestType"
+        status:
+          $ref: "#/components/schemas/RequestStatus"
+        referenceNumber:
+          type: string
+          nullable: true
+          description: Auto-assigned on submission
+        vendorId:
+          type: string
+          format: uuid
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        slaDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        requiresInternalSigning:
+          type: boolean
+        rejectionReason:
+          type: string
+          nullable: true
+        firstHandlerId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        data:
+          $ref: "#/components/schemas/LegalRequestData"
+          nullable: true
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/LegalRequestAttachment"
+        finalDocuments:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinalDocument"
+        stageHistories:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageHistory"
+        vendor:
+          $ref: "#/components/schemas/Vendor"
+          nullable: true
+        requestor:
+          $ref: "#/components/schemas/User"
+
+    LokasiKantor:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    Divisi:
+      type: object
+      required: [id, name, code, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        code:
+          type: string
+          pattern: "^[A-Z0-9]{1,5}$"
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    UnitBisnis:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    SlaConfig:
+      type: object
+      required: [id, workingDays, updatedAt]
+      properties:
+        id:
+          type: string
+          readOnly: true
+          description: Always "singleton"
+        workingDays:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    Holiday:
+      type: object
+      required: [id, date, description, type, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        type:
+          $ref: "#/components/schemas/HolidayType"
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    # Request bodies
+    CreateUserRequest:
+      type: object
+      required: [email, name, role]
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+          enum: [REQUESTOR, LEGAL_TEAM]
+
+    CompleteProfileRequest:
+      type: object
+      required: [namaLengkap, lokasiKantorId, divisiId, unitBisnisId]
+      properties:
+        namaLengkap:
+          type: string
+        lokasiKantorId:
+          type: string
+          format: uuid
+        divisiId:
+          type: string
+          format: uuid
+        unitBisnisId:
+          type: string
+          format: uuid
+
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        namaLengkap:
+          type: string
+        lokasiKantorId:
+          type: string
+          format: uuid
+        divisiId:
+          type: string
+          format: uuid
+        unitBisnisId:
+          type: string
+          format: uuid
+
+    KybDocumentUpload:
+      type: object
+      properties:
+        AKTA_PENDIRIAN:
+          type: string
+          format: binary
+        SK_PENDIRIAN:
+          type: string
+          format: binary
+        NIB:
+          type: string
+          format: binary
+        KTP_PENANGGUNG_JAWAB:
+          type: string
+          format: binary
+        NPWP_BADAN:
+          type: string
+          format: binary
+        AKTA_PERUBAHAN_DIREKSI:
+          type: string
+          format: binary
+        SK_PERUBAHAN_DIREKSI:
+          type: string
+          format: binary
+        SURAT_KUASA:
+          type: string
+          format: binary
+        KTP:
+          type: string
+          format: binary
+        NPWP:
+          type: string
+          format: binary
+
+    CreateRequestBody:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/RequestType"
+        submit:
+          type: boolean
+          default: false
+          description: Set true to submit immediately; false saves as DRAFT
+        vendorId:
+          type: string
+          format: uuid
+        lingkupPerjanjian:
+          type: string
+        statusPerjanjian:
+          $ref: "#/components/schemas/StatusPerjanjian"
+        jangkaWaktuStart:
+          type: string
+          format: date
+        jangkaWaktuEnd:
+          type: string
+          format: date
+        perjanjianSebelumnya:
+          type: string
+        halYangInginDiubah:
+          type: string
+        suratYangHendakDibuat:
+          type: string
+        identitasPenerimaSurat:
+          type: string
+        dokumenYangDiminta:
+          type: string
+        tujuanPermintaan:
+          type: string
+        ADENDUM_PREVIOUS_AGREEMENT:
+          type: string
+          format: binary
+        SURAT_PRIOR_CORRESPONDENCE:
+          type: string
+          format: binary
+        PERMINTAAN_SUPPORTING_DOC:
+          type: string
+          format: binary
+
+    UpdateRequestBody:
+      type: object
+      description: Same fields as CreateRequestBody minus `type`; only allowed in DRAFT status.
+      properties:
+        vendorId:
+          type: string
+          format: uuid
+        lingkupPerjanjian:
+          type: string
+        statusPerjanjian:
+          $ref: "#/components/schemas/StatusPerjanjian"
+        jangkaWaktuStart:
+          type: string
+          format: date
+        jangkaWaktuEnd:
+          type: string
+          format: date
+        perjanjianSebelumnya:
+          type: string
+        halYangInginDiubah:
+          type: string
+        suratYangHendakDibuat:
+          type: string
+        identitasPenerimaSurat:
+          type: string
+        dokumenYangDiminta:
+          type: string
+        tujuanPermintaan:
+          type: string
+        ADENDUM_PREVIOUS_AGREEMENT:
+          type: string
+          format: binary
+        SURAT_PRIOR_CORRESPONDENCE:
+          type: string
+          format: binary
+        PERMINTAAN_SUPPORTING_DOC:
+          type: string
+          format: binary
+
+    TransitionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: "#/components/schemas/TransitionAction"
+        remarks:
+          type: string
+          description: Optional notes for SEND_BACK or REJECT actions
+        reason:
+          type: string
+          description: Rejection reason for REJECT action
+
+    CreateHolidayRequest:
+      type: object
+      required: [date, description, type]
+      properties:
+        date:
+          type: string
+          format: date
+          description: ISO 8601 date (YYYY-MM-DD)
+        description:
+          type: string
+        type:
+          $ref: "#/components/schemas/HolidayType"
+
+  # ---------------------------------------------------------------------------
+  # Parameters
+  # ---------------------------------------------------------------------------
+  parameters:
+    IdParam:
+      name: id
+      in: path
+      required: true
+      description: Resource UUID
+      schema:
+        type: string
+        format: uuid
+
+  # ---------------------------------------------------------------------------
+  # Responses
+  # ---------------------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: Validation error or invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Invalid request parameters"
+
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Unauthorized"
+
+    Forbidden:
+      description: Authenticated but insufficient permissions or account deactivated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Forbidden"
+
+    NotFound:
+      description: Resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Not found"
+
+    Conflict:
+      description: Unique constraint violation (duplicate email, code, date, etc.)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Email already exists"
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Internal server error"
+
+  # ---------------------------------------------------------------------------
+  # Security Schemes
+  # ---------------------------------------------------------------------------
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase-issued JWT. Pass as `Authorization: Bearer <token>`.
+
+security:
+  - bearerAuth: []
