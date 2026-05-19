@@ -9,3 +9,8 @@ ralph-once.sh
 afk-ralph.sh
 ralph-prompt.md
 progress.txt
+
+# Claude Code
+.agents/
+.claude/
+skills-lock.json
